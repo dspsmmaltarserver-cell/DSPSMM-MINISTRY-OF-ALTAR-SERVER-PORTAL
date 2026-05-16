@@ -23,12 +23,11 @@
       const auth = getAuth(app);
       const db = getFirestore(app);
 
-      // Global current user role
       window.currentUserRole = null;
       window.currentUserId = null;
       window.currentUserFullName = null;
 
-      // --- AUTH LOGIC ---
+      // --- AUTH ---
       window.handleRegister = async () => {
           const email = document.getElementById('reg-email').value.trim();
           const password = document.getElementById('reg-pass').value;
@@ -36,7 +35,7 @@
           const username = document.getElementById('reg-username').value.trim().toLowerCase();
           if(!email || !password || !name || !username) return alert("Fill all fields.");
           const usnap = await getDocs(query(collection(db, "profiles"), where("username", "==", username)));
-          if (!usnap.empty) return alert("Username already taken. Please choose another.");
+          if (!usnap.empty) return alert("Username already taken.");
           try {
               const userCred = await createUserWithEmailAndPassword(auth, email, password);
               await setDoc(doc(db, "profiles", userCred.user.uid), {
@@ -51,59 +50,41 @@
           const identifier = document.getElementById('login-email').value.trim();
           const password = document.getElementById('login-pass').value;
           let emailToUse = identifier;
-
           if (!identifier.includes('@')) {
               try {
-                  const q = query(collection(db, "profiles"), where("username", "==", identifier.toLowerCase()));
-                  const snap = await getDocs(q);
+                  const snap = await getDocs(query(collection(db, "profiles"), where("username", "==", identifier.toLowerCase())));
                   if (snap.empty) { alert("Username not found."); return; }
                   emailToUse = snap.docs[0].data().email;
               } catch(e) { alert("Login failed."); return; }
           }
-
           try { await signInWithEmailAndPassword(auth, emailToUse, password); }
           catch (e) { alert("Login failed. Check your credentials."); }
       };
 
       window.handleLogout = () => signOut(auth).then(() => {
-          window.currentUserRole = null;
-          window.currentUserId = null;
-          window.currentUserFullName = null;
+          window.currentUserRole = null; window.currentUserId = null; window.currentUserFullName = null;
           showSection('login-section');
       });
 
       window.handleForgotPassword = async () => {
           const identifier = document.getElementById('forgot-identifier').value.trim();
           if (!identifier) return alert("Please enter your email or username.");
-          let emailToUse = identifier;
-          let fullNameFound = '';
-
+          let emailToUse = identifier, fullNameFound = '';
           if (!identifier.includes('@')) {
-              const q = query(collection(db, "profiles"), where("username", "==", identifier.toLowerCase()));
-              const snap = await getDocs(q);
+              const snap = await getDocs(query(collection(db, "profiles"), where("username", "==", identifier.toLowerCase())));
               if (snap.empty) { alert("Username not found."); return; }
               emailToUse = snap.docs[0].data().email;
               fullNameFound = snap.docs[0].data().full_name || '';
           } else {
-              const q = query(collection(db, "profiles"), where("email", "==", identifier));
-              const snap = await getDocs(q);
+              const snap = await getDocs(query(collection(db, "profiles"), where("email", "==", identifier)));
               if (!snap.empty) fullNameFound = snap.docs[0].data().full_name || '';
           }
-
           try {
-              await addDoc(collection(db, "password_requests"), {
-                  identifier: identifier,
-                  email: emailToUse,
-                  full_name: fullNameFound,
-                  requested_at: serverTimestamp(),
-                  resolved: false
-              });
+              await addDoc(collection(db, "password_requests"), { identifier, email: emailToUse, full_name: fullNameFound, requested_at: serverTimestamp(), resolved: false });
               await sendPasswordResetEmail(auth, emailToUse);
-              alert("Password reset email sent! The admin has also been notified.");
+              alert("Password reset email sent! Admin has been notified.");
               showSection('login-section');
-          } catch(e) {
-              alert("Could not process request: " + e.message);
-          }
+          } catch(e) { alert("Could not process request: " + e.message); }
       };
 
       onAuthStateChanged(auth, async (user) => {
@@ -117,764 +98,570 @@
               if (!p.is_approved) showSection('pending-section');
               else {
                   document.getElementById('welcome-msg').innerText = `Welcome, ${p.full_name}`;
-                  updateUIByRole(p.role);
-                  showSection('main-menu');
-                  // Pre-fill recording officer
                   const officerInput = document.getElementById('officer-name-input');
                   if (officerInput) officerInput.value = p.full_name || '';
+                  await window.updateUIByRole(p.role);
+                  showSection('main-menu');
                   startPendingCounters();
               }
           }
       });
 
       // Expose Firebase
-      window._db = db;
-      window._getDocs = getDocs;
-      window._query = query;
-      window._collection = collection;
-      window._where = where;
-      window._updateDoc = updateDoc;
-      window._doc = doc;
-      window._deleteDoc = deleteDoc;
-      window._addDoc = addDoc;
-      window._serverTimestamp = serverTimestamp;
-      window._setDoc = setDoc;
-      window._getDoc = getDoc;
-      window._onSnapshot = onSnapshot;
-      window._orderBy = orderBy;
+      window._db = db; window._getDocs = getDocs; window._query = query; window._collection = collection;
+      window._where = where; window._updateDoc = updateDoc; window._doc = doc; window._deleteDoc = deleteDoc;
+      window._addDoc = addDoc; window._serverTimestamp = serverTimestamp; window._setDoc = setDoc;
+      window._getDoc = getDoc; window._onSnapshot = onSnapshot; window._orderBy = orderBy;
 
       // LIVE NOTIFICATION COUNTERS
       window.startPendingCounters = () => {
           if (window.currentUserRole !== 'admin') return;
-          // Pending approvals
           onSnapshot(query(collection(db, "profiles"), where("is_approved","==",false)), (snap) => {
-              const count = snap.size;
-              const badge = document.getElementById('pending-badge');
-              if (badge) {
-                  badge.textContent = count > 0 ? count : '';
-                  badge.style.display = count > 0 ? 'inline-flex' : 'none';
-              }
+              const b = document.getElementById('pending-badge');
+              if (b) { b.textContent = snap.size || ''; b.style.display = snap.size > 0 ? 'inline-flex' : 'none'; }
           });
-          // Password requests
           onSnapshot(query(collection(db, "password_requests"), where("resolved","==",false)), (snap) => {
-              const count = snap.size;
-              const badge = document.getElementById('pw-request-badge');
-              if (badge) {
-                  badge.textContent = count > 0 ? count : '';
-                  badge.style.display = count > 0 ? 'inline-flex' : 'none';
-              }
+              const b = document.getElementById('pw-request-badge');
+              if (b) { b.textContent = snap.size || ''; b.style.display = snap.size > 0 ? 'inline-flex' : 'none'; }
+          });
+          onSnapshot(query(collection(db, "concerns"), where("status","==","open")), (snap) => {
+              const b = document.getElementById('concerns-badge');
+              if (b) { b.textContent = snap.size || ''; b.style.display = snap.size > 0 ? 'inline-flex' : 'none'; }
           });
       };
 
       window.loadPending = async () => {
-          const q = query(collection(db, "profiles"), where("is_approved", "==", false));
-          const snap = await getDocs(q);
+          const snap = await getDocs(query(collection(db, "profiles"), where("is_approved","==",false)));
           const list = document.getElementById('pending-users-list');
-          list.innerHTML = snap.empty ? '<p style="font-size:12px; opacity:0.6;">No pending servers.</p>' : '';
-          snap.forEach((d) => {
+          list.innerHTML = snap.empty ? '<p style="font-size:12px;opacity:0.6;">No pending servers.</p>' : '';
+          snap.forEach(d => {
               const u = d.data();
-              const div = document.createElement('div');
-              div.className = "member-row";
-              div.innerHTML = `<strong>${u.full_name}</strong><br><small>${u.email}</small><br><small style="color:var(--gold)">@${u.username || 'no username'}</small><br>
-                               <button onclick="approveUser('${d.id}')" class="btn-primary" style="margin-top:10px;">Approve</button>`;
+              const div = document.createElement('div'); div.className = 'member-row';
+              div.innerHTML = `<strong>${u.full_name}</strong><br><small>${u.email}</small><br><small style="color:var(--gold)">@${u.username||'no username'}</small><br>
+                  <button onclick="approveUser('${d.id}')" class="btn-primary" style="margin-top:10px;">Approve</button>`;
               list.appendChild(div);
           });
       };
 
-      window.approveUser = async (uid) => {
-          await updateDoc(doc(db, "profiles", uid), { is_approved: true });
-          loadPending();
-      };
+      window.approveUser = async (uid) => { await updateDoc(doc(db,"profiles",uid),{is_approved:true}); loadPending(); };
 
       window.loadPasswordRequests = async () => {
-          const q = query(collection(db, "password_requests"), where("resolved", "==", false));
-          const snap = await getDocs(q);
+          const snap = await getDocs(query(collection(db,"password_requests"),where("resolved","==",false)));
           const list = document.getElementById('pw-requests-list');
           if (!list) return;
-          list.innerHTML = snap.empty ? '<p style="font-size:13px; opacity:0.6;">No pending requests.</p>' : '';
-          snap.forEach((d) => {
-              const r = d.data();
-              const div = document.createElement('div');
-              div.className = 'member-row';
-              div.innerHTML = `<strong>${r.full_name || 'Unknown User'}</strong><br>
-                  <small>${r.identifier} &bull; ${r.email}</small><br>
-                  <button onclick="resolvePasswordRequest('${d.id}', this)" class="btn-primary" style="margin-top:10px;">Mark Resolved</button>`;
+          list.innerHTML = snap.empty ? '<p style="font-size:13px;opacity:0.6;">No pending requests.</p>' : '';
+          snap.forEach(d => {
+              const r = d.data(); const div = document.createElement('div'); div.className = 'member-row';
+              div.innerHTML = `<strong>${r.full_name||'Unknown User'}</strong><br><small>${r.identifier} &bull; ${r.email}</small><br>
+                  <button onclick="resolvePasswordRequest('${d.id}',this)" class="btn-primary" style="margin-top:10px;">Mark Resolved</button>`;
               list.appendChild(div);
           });
       };
 
       window.resolvePasswordRequest = async (id, btn) => {
-          btn.disabled = true;
-          btn.textContent = 'Resolving...';
+          btn.disabled = true; btn.textContent = 'Resolving...';
           try {
-              await updateDoc(doc(db, "password_requests", id), { resolved: true });
-              const row = btn.closest('.member-row');
-              if (row) row.remove();
+              await updateDoc(doc(db,"password_requests",id),{resolved:true});
+              const row = btn.closest('.member-row'); if (row) row.remove();
               const list = document.getElementById('pw-requests-list');
-              if (list && list.children.length === 0) {
-                  list.innerHTML = '<p style="font-size:13px; opacity:0.6;">No pending requests.</p>';
-              }
+              if (list && list.children.length === 0) list.innerHTML = '<p style="font-size:13px;opacity:0.6;">No pending requests.</p>';
+          } catch(err) { btn.disabled=false; btn.textContent='Mark Resolved'; alert('Error: '+err.message); }
+      };
+
+      // CONCERNS
+      window.submitConcern = async () => {
+          const name = document.getElementById('concern-name').value.trim();
+          const category = document.getElementById('concern-category').value;
+          const message = document.getElementById('concern-message').value.trim();
+          if (!message) { alert("Please write your concern or feedback before submitting."); return; }
+          const btn = document.getElementById('concern-submit-btn');
+          btn.disabled = true; btn.textContent = 'Sending...';
+          try {
+              await addDoc(collection(db,"concerns"), {
+                  name: name || 'Anonymous', category, message,
+                  submitted_at: serverTimestamp(), status: 'open'
+              });
+              showSection('concern-success');
+          } catch(err) { alert('Error submitting: '+err.message); btn.disabled=false; btn.textContent='Send Message'; }
+      };
+
+      window.loadConcerns = async (tab='open') => {
+          window._currentConcernTab = tab;
+          ['open','resolved'].forEach(t => {
+              const el = document.getElementById(`concern-tab-${t}`);
+              if (el) el.style.borderColor = t===tab ? 'var(--gold)' : 'var(--border)';
+          });
+          const list = document.getElementById('concerns-admin-list');
+          list.innerHTML = '<p style="font-size:12px;opacity:0.6;">Loading...</p>';
+          try {
+              const snap = await getDocs(query(collection(db,"concerns"), where("status","==",tab)));
+              list.innerHTML = snap.empty ? `<p style="font-size:12px;opacity:0.6;">No ${tab} concerns.</p>` : '';
+              const docs = snap.docs.map(d=>({id:d.id,...d.data()}))
+                  .sort((a,b)=>(b.submitted_at?.toDate?.()??0)-(a.submitted_at?.toDate?.()??0));
+              docs.forEach(r => {
+                  const div = document.createElement('div'); div.className = 'concern-item';
+                  const dateStr = r.submitted_at ? r.submitted_at.toDate().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Unknown date';
+                  div.innerHTML = `
+                      <div class="concern-header">
+                          <span class="concern-cat cat-${r.category.toLowerCase().replace(/[^a-z]/g,'_')}">${r.category}</span>
+                          <span class="concern-date">${dateStr}</span>
+                      </div>
+                      <div class="concern-from">From: <strong>${r.name||'Anonymous'}</strong></div>
+                      <div class="concern-msg">${r.message}</div>
+                      ${tab==='open' ? `<button onclick="resolveConcern('${r.id}',this)" class="btn-primary" style="margin-top:10px;min-height:38px;font-size:13px;">✓ Mark as Solved</button>` :
+                      '<span style="font-size:11px;color:var(--present);font-weight:700;">✓ Resolved</span>'}`;
+                  list.appendChild(div);
+              });
+          } catch(err) { list.innerHTML = '<p style="color:var(--absent);">Error: '+err.message+'</p>'; }
+      };
+
+      window.resolveConcern = async (id, btn) => {
+          btn.disabled=true; btn.textContent='Resolving...';
+          try {
+              await updateDoc(doc(db,"concerns",id),{status:'resolved', resolved_at: serverTimestamp()});
+              loadConcerns('open');
+          } catch(err) { btn.disabled=false; btn.textContent='✓ Mark as Solved'; alert('Error: '+err.message); }
+      };
+
+      // WARNINGS
+      window.loadWarningsPanel = async () => {
+          const container = document.getElementById('warnings-group-list');
+          container.innerHTML = '';
+          const meetingGroups = Object.keys(window.groupMembers).filter(g=>g!=='Other Occasions');
+          meetingGroups.forEach(gn => {
+              const btn = document.createElement('button');
+              btn.className = 'btn-secondary'; btn.type = 'button'; btn.textContent = gn;
+              btn.onclick = () => { window._warningCurrentGroup=gn; loadGroupWarnings(gn); };
+              container.appendChild(btn);
+          });
+          document.getElementById('warnings-group-view').style.display = 'block';
+          document.getElementById('warnings-detail-view').style.display = 'none';
+      };
+
+      window.loadGroupWarnings = async (groupName) => {
+          document.getElementById('warnings-group-view').style.display = 'none';
+          document.getElementById('warnings-detail-view').style.display = 'block';
+          document.getElementById('warnings-group-title').textContent = groupName;
+          const container = document.getElementById('warnings-member-list');
+          container.innerHTML = '<p style="font-size:12px;opacity:0.6;">Calculating attendance...</p>';
+          const members = window.groupMembers[groupName] || [];
+          try {
+              const snap = await getDocs(query(collection(db,"attendance_history"),where("group","==",groupName)));
+              const memberStats = {};
+              members.forEach(m => { memberStats[m] = { present:0, absent:0, excused:0, suspended:0, total:0 }; });
+              snap.docs.forEach(d => {
+                  const r = d.data();
+                  if (!memberStats[r.member_name]) memberStats[r.member_name] = {present:0,absent:0,excused:0,suspended:0,total:0};
+                  memberStats[r.member_name].total++;
+                  if (r.status==='present') memberStats[r.member_name].present++;
+                  else {
+                      memberStats[r.member_name].absent++;
+                      const rl = (r.reason||'').toLowerCase();
+                      if (rl==='suspended') memberStats[r.member_name].suspended++;
+                      else if (['excused','sick','school/work'].includes(rl)) memberStats[r.member_name].excused++;
+                  }
+              });
+              const overrideSnap = await getDocs(query(collection(db,"warning_overrides"),where("group","==",groupName)));
+              const overrides = {};
+              overrideSnap.docs.forEach(d => { overrides[d.data().member_name] = d.data().status; });
+              container.innerHTML = '';
+              members.forEach(m => {
+                  const s = memberStats[m] || {present:0,absent:0,total:0};
+                  const rate = s.total > 0 ? (s.present/s.total) : 1;
+                  let autoStatus = 'active';
+                  if (s.total === 0) autoStatus = 'active';
+                  else if (rate >= 0.75) autoStatus = 'active';
+                  else if (rate >= 0.6) autoStatus = 'few_absent';
+                  else if (rate >= 0.4) autoStatus = 'warning';
+                  else autoStatus = 'inactive';
+                  const finalStatus = overrides[m] || autoStatus;
+                  const statusInfo = {
+                      active: {label:'Active',color:'var(--present)',bg:'rgba(40,167,69,0.1)'},
+                      few_absent: {label:'Few Absent',color:'#d4a017',bg:'rgba(212,160,23,0.1)'},
+                      warning: {label:'Warning',color:'#e67e22',bg:'rgba(230,126,34,0.1)'},
+                      inactive: {label:'Inactive',color:'var(--absent)',bg:'rgba(220,53,69,0.1)'}
+                  }[finalStatus] || {label:'Active',color:'var(--present)',bg:'rgba(40,167,69,0.1)'};
+                  const row = document.createElement('div');
+                  row.className = 'warning-member-row';
+                  row.style.background = statusInfo.bg;
+                  row.style.borderColor = statusInfo.color;
+                  const pct = s.total>0 ? Math.round((s.present/s.total)*100) : 100;
+                  row.innerHTML = `
+                      <div class="warning-row-header">
+                          <strong>${m}</strong>
+                          <span class="warning-status-badge" style="color:${statusInfo.color};border-color:${statusInfo.color};">${statusInfo.label}</span>
+                      </div>
+                      <div style="font-size:11px;opacity:0.7;margin-bottom:8px;">Present: ${s.present}/${s.total} (${pct}%)</div>
+                      <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;">
+                          <select onchange="overrideMemberStatus('${groupName}','${m}',this.value)" class="warning-status-select">
+                              <option value="">Auto (${statusInfo.label})</option>
+                              <option value="active" ${overrides[m]==='active'?'selected':''}>✓ Active</option>
+                              <option value="few_absent" ${overrides[m]==='few_absent'?'selected':''}>⚠ Few Absent</option>
+                              <option value="warning" ${overrides[m]==='warning'?'selected':''}>⚡ Warning</option>
+                              <option value="inactive" ${overrides[m]==='inactive'?'selected':''}>✗ Inactive</option>
+                          </select>
+                          <button onclick="resetMemberStatus('${groupName}','${m}')" class="warning-btn-reset">Reset</button>
+                          ${(finalStatus==='warning'||finalStatus==='inactive') ? `<button onclick="sendWarningMessage('${m}','${finalStatus}')" class="warning-btn-warn">⚠ Warn</button>` : ''}
+                      </div>`;
+                  container.appendChild(row);
+              });
+              const legend = document.createElement('div');
+              legend.style.cssText='margin-top:16px;padding:12px;background:var(--input);border-radius:10px;border:2px solid var(--border);font-size:11px;';
+              legend.innerHTML=`<strong style="color:var(--gold);display:block;margin-bottom:8px;">Legend</strong>
+                  <span style="color:var(--present);">● Active</span> ≥75% &nbsp;
+                  <span style="color:#d4a017;">● Few Absent</span> 60–74% &nbsp;
+                  <span style="color:#e67e22;">● Warning</span> 40–59% &nbsp;
+                  <span style="color:var(--absent);">● Inactive</span> &lt;40%`;
+              container.appendChild(legend);
           } catch(err) {
-              btn.disabled = false;
-              btn.textContent = 'Mark Resolved';
-              alert('Error: ' + err.message);
+              container.innerHTML = '<p style="color:var(--absent);">Error: '+err.message+'</p>';
           }
       };
 
-      // Load groups from Firestore, fallback to hardcoded
+      window.overrideMemberStatus = async (groupName, memberName, status) => {
+          try {
+              const id = `${groupName}_${memberName}`.replace(/ /g,'_');
+              if (!status) {
+                  await deleteDoc(doc(db,"warning_overrides",id));
+              } else {
+                  await setDoc(doc(db,"warning_overrides",id), { group:groupName, member_name:memberName, status, updated_at:serverTimestamp() });
+              }
+              showCopyFeedback('✓ Status updated');
+              setTimeout(()=>loadGroupWarnings(groupName), 500);
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      window.resetMemberStatus = async (groupName, memberName) => {
+          try {
+              const id = `${groupName}_${memberName}`.replace(/ /g,'_');
+              await deleteDoc(doc(db,"warning_overrides",id));
+              showCopyFeedback('✓ Status reset to auto');
+              setTimeout(()=>loadGroupWarnings(groupName), 500);
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      window.sendWarningMessage = async (memberName, status) => {
+          const label = status==='inactive' ? 'Inactive' : 'Warning';
+          const msg = status==='inactive'
+              ? `⚠️ ATTENDANCE NOTICE\n\nDear ${memberName},\n\nYour attendance record has been flagged as INACTIVE. Please coordinate with your group leader or the executive officers as soon as possible.\n\n— Executive Officers, Ministry of Altar Servers`
+              : `⚠️ ATTENDANCE WARNING\n\nDear ${memberName},\n\nYour attendance has been marked with a WARNING. Please improve your attendance or communicate valid reasons to your group leader.\n\n— Executive Officers, Ministry of Altar Servers`;
+          try {
+              await addDoc(collection(db,"member_warnings"), {
+                  member_name: memberName, status: label, message: msg,
+                  sent_at: serverTimestamp(), sent_by: window.currentUserId, read: false
+              });
+              alert(`Warning message sent to ${memberName}'s serve history.`);
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      // Load groups from Firestore
       window.loadGroupsFromFirestore = async () => {
-          const meetingGroups = Object.keys(window.groupMembers).filter(gn => gn !== 'Other Occasions');
-          for (const groupName of meetingGroups) {
+          const meetingGroups = Object.keys(window.groupMembers).filter(gn=>gn!=='Other Occasions');
+          for (const gn of meetingGroups) {
               try {
-                  const snap = await getDoc(doc(db, "groups", groupName));
-                  if (snap.exists()) {
-                      window.groupMembers[groupName] = snap.data().members || window.groupMembers[groupName];
-                  }
-              } catch(err) {}
+                  const snap = await getDoc(doc(db,"groups",gn));
+                  if (snap.exists()) window.groupMembers[gn] = snap.data().members || window.groupMembers[gn];
+              } catch(err){}
           }
-          // Rebuild allMembers
           let all = [];
           meetingGroups.forEach(gn => { all = all.concat(window.groupMembers[gn]); });
           window.groupMembers['Other Occasions'] = all;
-          // Rebuild dependent UI
-          buildGroupButtons();
-          buildMeetingList();
-          buildGroupMembersEditor();
+          buildGroupButtons(); buildMeetingList(); buildGroupMembersEditor();
       };
     </script>
     
     <style>
         :root {
-            --bg: #f8f9fa;
-            --card-bg: #ffffff;
-            --text: #1a1a1a;
-            --accent: #a30000;
-            --gold: #b8860b;
-            --gold-light: #d4af37;
-            --input: #ffffff;
-            --border: #e0e0e0;
-            --border-dark: #ddd;
-            --absent: #dc3545;
-            --present: #28a745;
-            --shadow: rgba(0, 0, 0, 0.06);
-            --shadow-hover: rgba(0, 0, 0, 0.12);
+            --bg: #f8f9fa; --card-bg: #ffffff; --text: #1a1a1a;
+            --accent: #a30000; --gold: #b8860b; --gold-light: #d4af37;
+            --input: #ffffff; --border: #e0e0e0; --border-dark: #ddd;
+            --absent: #dc3545; --present: #28a745;
+            --warning-orange: #e67e22; --warning-yellow: #d4a017; --warning-black: #1a1a1a;
+            --shadow: rgba(0,0,0,0.06); --shadow-hover: rgba(0,0,0,0.12);
         }
-
         [data-theme="dark"] {
-            --bg: #0a0a0a;
-            --card-bg: #1a1a1a;
-            --text: #f5f5f5;
-            --accent: #8B0000;
-            --gold: #d4af37;
-            --gold-light: #e6c547;
-            --input: #2a2a2a;
-            --border: #333333;
-            --border-dark: #444;
-            --shadow: rgba(0, 0, 0, 0.3);
-            --shadow-hover: rgba(0, 0, 0, 0.5);
+            --bg: #0a0a0a; --card-bg: #1a1a1a; --text: #f5f5f5;
+            --accent: #8B0000; --gold: #d4af37; --gold-light: #e6c547;
+            --input: #2a2a2a; --border: #333333; --border-dark: #444;
+            --shadow: rgba(0,0,0,0.3); --shadow-hover: rgba(0,0,0,0.5);
+            --warning-black: #888;
         }
-
         * { box-sizing: border-box; }
-
         body {
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            background-color: var(--bg); color: var(--text);
+            margin: 0; padding: 0;
+            display: flex; flex-direction: column; align-items: center;
             min-height: 100vh;
             transition: background-color 0.3s ease, color 0.3s ease;
             cursor: default;
         }
+        header { width:100%; text-align:center; padding:20px 10px 14px; box-sizing:border-box; animation: slideDown 0.5s ease; }
 
-        header {
-            width: 100%;
-            text-align: center;
-            padding: 20px 10px 14px;
-            box-sizing: border-box;
-            animation: slideDown 0.5s ease;
-        }
+        @keyframes slideDown { from{opacity:0;transform:translateY(-10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes fadeInUp { from{opacity:0;transform:translateY(15px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+        @keyframes scaleIn { from{opacity:0;transform:scale(0.85)} to{opacity:1;transform:scale(1)} }
+        @keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+        @keyframes bounceIn { 0%{opacity:0;transform:scale(0.3)} 50%{opacity:1;transform:scale(1.05)} 70%{transform:scale(0.9)} 100%{transform:scale(1)} }
+        @keyframes floatUp { 0%{opacity:0;transform:translateY(30px) scale(0.9)} 60%{opacity:1;transform:translateY(-5px) scale(1.02)} 100%{opacity:1;transform:translateY(0) scale(1)} }
 
-        @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(15px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        @keyframes scaleIn {
-            from { opacity: 0; transform: scale(0.85); }
-            to { opacity: 1; transform: scale(1); }
-        }
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-
-        .logo-row {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 18px;
-        }
-        .logo-side {
-            width: 70px; height: 70px;
-            object-fit: contain;
-            opacity: 0.92;
-            transition: opacity 0.2s;
-        }
-        .logo-side:hover { opacity: 1; }
-        .logo-center { width: 100px; height: 100px; object-fit: contain; }
-        .logo-col { display: flex; flex-direction: column; align-items: center; }
-        .motto {
-            font-family: 'Georgia', serif;
-            font-style: italic;
-            font-size: 12px;
-            color: var(--gold);
-            margin-top: 10px;
-            letter-spacing: 1.5px;
-            font-weight: 500;
-        }
+        .logo-row { display:flex; align-items:center; justify-content:center; gap:18px; }
+        .logo-side { width:70px;height:70px;object-fit:contain;opacity:0.92;transition:opacity 0.2s; }
+        .logo-side:hover { opacity:1; }
+        .logo-center { width:100px;height:100px;object-fit:contain; }
+        .logo-col { display:flex;flex-direction:column;align-items:center; }
+        .motto { font-family:'Georgia',serif;font-style:italic;font-size:12px;color:var(--gold);margin-top:10px;letter-spacing:1.5px;font-weight:500; }
 
         .portal-container {
-            width: 92%;
-            max-width: 480px;
-            background: var(--card-bg);
-            border-top: 4px solid var(--gold);
-            border-radius: 16px;
-            padding: 28px;
-            box-sizing: border-box;
-            box-shadow: 0 8px 32px var(--shadow);
-            position: relative;
-            margin-bottom: 30px;
-            flex-grow: 1;
+            width:92%; max-width:480px;
+            background:var(--card-bg);
+            border-top:4px solid var(--gold);
+            border-radius:16px;
+            padding:28px;
+            box-sizing:border-box;
+            box-shadow:0 8px 32px var(--shadow);
+            position:relative;
+            margin-bottom:30px;
+            flex-grow:1;
             animation: fadeInUp 0.6s ease;
         }
 
-        /* BUTTONS */
-        button { cursor: pointer; }
+        button { cursor:pointer; }
 
-        .btn-primary,
-        .btn-secondary,
-        .btn-outline,
-        .btn-logout {
-            font-family: inherit;
-            font-weight: 600;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            font-size: 14px;
-            letter-spacing: 0.3px;
-            position: relative;
-            overflow: hidden;
-            display: block;
-            width: 100%;
+        .btn-primary,.btn-secondary,.btn-outline,.btn-logout {
+            font-family:inherit; font-weight:600; border-radius:10px; cursor:pointer;
+            transition:all 0.25s cubic-bezier(0.4,0,0.2,1); font-size:14px;
+            letter-spacing:0.3px; position:relative; overflow:hidden;
+            display:block; width:100%;
         }
-        .btn-primary {
-            min-height: 52px;
-            background: var(--accent);
-            color: white;
-            border: 2px solid var(--accent);
-            margin-bottom: 12px;
-            font-size: 15px;
-            font-weight: 700;
-        }
-        .btn-primary:hover:not(:disabled) {
-            background: rgba(163, 0, 0, 0.9);
-            box-shadow: 0 6px 20px rgba(163, 0, 0, 0.25);
-            transform: translateY(-2px);
-        }
-        .btn-primary:active:not(:disabled) { transform: translateY(0); }
-        .btn-secondary, .btn-outline {
-            min-height: 48px;
-            background: transparent;
-            border: 2px solid var(--border);
-            color: var(--text);
-            margin-bottom: 10px;
-            font-size: 14px;
-        }
-        .btn-secondary:hover:not(:disabled), .btn-outline:hover:not(:disabled) {
-            border-color: var(--gold);
-            color: var(--gold);
-            background: rgba(184, 134, 11, 0.05);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px var(--shadow);
-        }
-        .btn-secondary:active:not(:disabled), .btn-outline:active:not(:disabled) { transform: translateY(0); }
-        .btn-logout {
-            background: transparent;
-            border: 2px solid var(--absent);
-            color: var(--absent);
-            padding: 8px 16px;
-            font-size: 13px;
-            min-height: auto;
-            margin-bottom: 0;
-            width: auto;
-            display: inline-block;
-        }
-        .btn-logout:hover:not(:disabled) {
-            background: rgba(220, 53, 69, 0.08);
-            transform: translateY(-1px);
-            box-shadow: 0 3px 10px rgba(220, 53, 69, 0.15);
-        }
-        .btn-primary:disabled, .btn-secondary:disabled, .btn-logout:disabled { opacity: 0.6; cursor: not-allowed; }
-        .btn-sm-nav { height: 40px; min-height: 40px; margin-bottom: 18px; font-size: 13px; }
+        .btn-primary { min-height:52px;background:var(--accent);color:white;border:2px solid var(--accent);margin-bottom:12px;font-size:15px;font-weight:700; }
+        .btn-primary:hover:not(:disabled) { background:rgba(163,0,0,0.9);box-shadow:0 6px 20px rgba(163,0,0,0.25);transform:translateY(-2px); }
+        .btn-primary:active:not(:disabled) { transform:translateY(0); }
+        .btn-secondary,.btn-outline { min-height:48px;background:transparent;border:2px solid var(--border);color:var(--text);margin-bottom:10px;font-size:14px; }
+        .btn-secondary:hover:not(:disabled),.btn-outline:hover:not(:disabled) { border-color:var(--gold);color:var(--gold);background:rgba(184,134,11,0.05);transform:translateY(-2px);box-shadow:0 4px 15px var(--shadow); }
+        .btn-secondary:active:not(:disabled),.btn-outline:active:not(:disabled) { transform:translateY(0); }
+        .btn-logout { background:transparent;border:2px solid var(--absent);color:var(--absent);padding:8px 16px;font-size:13px;min-height:auto;margin-bottom:0;width:auto;display:inline-block; }
+        .btn-logout:hover:not(:disabled) { background:rgba(220,53,69,0.08);transform:translateY(-1px);box-shadow:0 3px 10px rgba(220,53,69,0.15); }
+        .btn-primary:disabled,.btn-secondary:disabled,.btn-logout:disabled { opacity:0.6;cursor:not-allowed; }
+        .btn-sm-nav { height:40px;min-height:40px;margin-bottom:18px;font-size:13px; }
 
         .theme-toggle {
-            position: absolute;
-            top: 18px; right: 18px;
-            background: var(--input);
-            border: 2px solid var(--border);
-            padding: 7px 13px;
-            border-radius: 24px;
-            font-size: 12px;
-            color: var(--text);
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.25s ease;
-            z-index: 100;
+            position:absolute; top:18px; right:18px;
+            background:var(--input); border:2px solid var(--border);
+            padding:7px 13px; border-radius:24px; font-size:12px;
+            color:var(--text); cursor:pointer; font-weight:600;
+            transition:all 0.25s ease; z-index:100;
         }
-        .theme-toggle:hover { border-color: var(--gold); color: var(--gold); background: rgba(184, 134, 11, 0.05); }
+        .theme-toggle:hover { border-color:var(--gold);color:var(--gold);background:rgba(184,134,11,0.05); }
 
-        .section { display: none; animation: fadeIn 0.4s ease; }
-        .active { display: block; }
+        .section { display:none; animation:fadeIn 0.4s ease; }
+        .active { display:block; }
 
-        input, textarea, select {
-            width: 100%;
-            padding: 12px;
-            background: var(--input);
-            border: 2px solid var(--border);
-            border-radius: 10px;
-            color: var(--text);
-            margin-bottom: 12px;
-            box-sizing: border-box;
-            font-size: 14px;
-            font-family: inherit;
-            transition: all 0.2s ease;
-            cursor: text;
+        input,textarea,select {
+            width:100%; padding:12px; background:var(--input);
+            border:2px solid var(--border); border-radius:10px; color:var(--text);
+            margin-bottom:12px; box-sizing:border-box; font-size:14px;
+            font-family:inherit; transition:all 0.2s ease; cursor:text;
         }
-        input:focus, textarea:focus, select:focus {
-            outline: none;
-            border-color: var(--gold);
-            box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.1);
-        }
-        select { cursor: pointer; }
-        textarea { resize: vertical; min-height: 100px; }
+        input:focus,textarea:focus,select:focus { outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(184,134,11,0.1); }
+        select { cursor:pointer; }
+        textarea { resize:vertical;min-height:100px; }
+        label { display:block;margin:16px 0 7px;font-weight:700;font-size:12px;color:var(--gold);text-transform:uppercase;letter-spacing:0.5px; }
 
-        label {
-            display: block;
-            margin: 16px 0 7px;
-            font-weight: 700;
-            font-size: 12px;
-            color: var(--gold);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
+        .member-row { background:var(--input);padding:14px 16px;border-radius:12px;margin-bottom:10px;border:2px solid var(--border);transition:all 0.2s ease; }
+        .member-row:hover { border-color:var(--gold);box-shadow:0 2px 8px var(--shadow); }
+        .member-main { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+        .member-main input[type="checkbox"] { width:24px;height:24px;accent-color:var(--present);cursor:pointer;flex-shrink:0;margin:0; }
+        .reason-box { display:none;margin-top:12px;padding-top:12px;border-top:2px dashed var(--border);animation:slideDown 0.3s ease; }
 
-        .member-row {
-            background: var(--input);
-            padding: 14px 16px;
-            border-radius: 12px;
-            margin-bottom: 10px;
-            border: 2px solid var(--border);
-            transition: all 0.2s ease;
-        }
-        .member-row:hover { border-color: var(--gold); box-shadow: 0 2px 8px var(--shadow); }
-        .member-main {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-        }
-        .member-main input[type="checkbox"] {
-            width: 24px; height: 24px;
-            accent-color: var(--present);
-            cursor: pointer;
-            flex-shrink: 0;
-            margin: 0;
-        }
-        .reason-box {
-            display: none;
-            margin-top: 12px;
-            padding-top: 12px;
-            border-top: 2px dashed var(--border);
-            animation: slideDown 0.3s ease;
-        }
+        .group-grid { display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px; }
+        .group-grid .btn-secondary { margin-bottom:0; }
 
-        .group-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 12px;
+        .success-image { width:140px;height:140px;border-radius:50%;border:4px solid var(--gold);margin-bottom:20px;box-shadow:0 8px 24px var(--shadow);animation:bounceIn 0.7s cubic-bezier(0.34,1.56,0.64,1); }
+
+        h2,h3 { color:var(--text);margin-top:0;transition:color 0.3s ease; }
+        h2 { font-size:24px;font-weight:700;text-align:center; }
+        h3 { font-size:18px;font-weight:600;color:var(--gold); }
+
+        .welcome-header { display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;border-bottom:2px solid var(--border);padding-bottom:16px;gap:12px;flex-wrap:wrap; }
+        #welcome-msg { font-size:14px;font-weight:700;color:var(--text); }
+
+        .time-group { display:flex;gap:10px;margin-bottom:12px; }
+        .time-group input { flex:1;margin-bottom:0; }
+
+        .history-item { background:var(--input);padding:12px 14px;border-radius:10px;margin-bottom:8px;border-left:4px solid var(--border);font-size:13px;transition:all 0.2s ease; }
+        .history-item.present { border-left-color:var(--present); }
+        .history-item.absent-excused { border-left-color:var(--warning-orange);background:rgba(230,126,34,0.05); }
+        .history-item.absent-unexcused { border-left-color:var(--absent);background:rgba(220,53,69,0.05); }
+        .history-item.absent-suspended { border-left-color:var(--warning-black);background:rgba(0,0,0,0.07); }
+        .history-item.warning-notice { border-left-color:var(--gold);background:rgba(184,134,11,0.07); }
+        .history-date { font-weight:700;color:var(--gold);display:block;margin-bottom:3px; }
+        .history-status { display:inline-block;padding:2px 6px;border-radius:12px;font-size:11px;font-weight:600; }
+        .history-status.present { background:rgba(40,167,69,0.15);color:var(--present); }
+        .history-status.absent { background:rgba(220,53,69,0.15);color:var(--absent); }
+        .history-status.excused { background:rgba(230,126,34,0.15);color:var(--warning-orange); }
+        .history-status.suspended { background:rgba(0,0,0,0.15);color:var(--warning-black); }
+        .history-status.notice { background:rgba(184,134,11,0.15);color:var(--gold); }
+
+        .footer { width:100%;text-align:center;font-size:11px;color:var(--text);opacity:0.6;padding:28px 10px;line-height:2;border-top:2px solid var(--border);margin-top:20px;transition:opacity 0.3s ease; }
+        .footer:hover { opacity:0.8; }
+        .footer-line1 { font-size:12px;font-weight:600; }
+
+        .attendance-counter { position:sticky;top:0;background:var(--card-bg);border:2px solid var(--gold);border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;justify-content:space-around;align-items:center;gap:10px;z-index:10;box-shadow:0 2px 8px var(--shadow); }
+        .counter-item { text-align:center;flex:1;display:flex;flex-direction:column;align-items:center;gap:4px; }
+        .counter-item .label { font-size:11px;color:var(--gold);text-transform:uppercase;font-weight:700;letter-spacing:0.5px;margin:0;line-height:1; }
+        .counter-item .count { font-size:22px;font-weight:700;color:var(--text);line-height:1; }
+        .counter-item.present .count { color:var(--present); }
+        .counter-item.absent .count { color:var(--absent); }
+        .counter-divider { width:1px;height:36px;background:var(--border);flex-shrink:0; }
+
+        .btn-copy-report { width:100%;min-height:48px;background:var(--gold);color:var(--card-bg);border:2px solid var(--gold);margin-bottom:12px;font-weight:700;border-radius:10px;cursor:pointer;transition:all 0.25s ease;margin-top:10px;font-size:14px;font-family:inherit; }
+        .btn-copy-report:hover:not(:disabled) { transform:translateY(-2px);box-shadow:0 6px 20px rgba(184,134,11,0.3);background:var(--gold-light);border-color:var(--gold-light); }
+
+        .meeting-group-header { display:flex;align-items:center;gap:10px;margin:18px 0 12px; }
+        .meeting-group-header span.line { flex:1;height:1px;background:var(--border); }
+        .meeting-group-header span.label { font-weight:700;color:var(--gold);font-size:12px;text-transform:uppercase;padding:0 8px;letter-spacing:0.5px; }
+
+        .member-check-item { display:flex;align-items:center;padding:12px 14px;background:var(--input);border:2px solid var(--border);border-radius:10px;margin-bottom:8px;transition:all 0.2s ease;cursor:pointer; }
+        .member-check-item:hover { border-color:var(--gold);box-shadow:0 2px 8px var(--shadow); }
+        .member-check-item input[type="checkbox"] { width:22px;height:22px;margin:0 12px 0 0;accent-color:var(--present);cursor:pointer;flex-shrink:0; }
+        .member-check-item .member-name { font-weight:600;color:var(--text);font-size:13px;flex:1; }
+        .member-check-item .check-status { font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;transition:all 0.2s ease; }
+        .check-status.present { background:rgba(40,167,69,0.12);color:var(--present); }
+        .check-status.absent { background:rgba(220,53,69,0.10);color:var(--absent); }
+
+        .mtg-reason-box { display:none;padding:10px 12px;background:rgba(220,53,69,0.04);border-left:3px solid var(--absent);border-radius:0 8px 8px 0;margin:6px 0 0 34px;animation:slideDown 0.2s ease; }
+        .mtg-reason-box select,.mtg-reason-box input { margin-bottom:8px; }
+
+        .bulk-action-row { display:flex;gap:8px;margin-bottom:12px; }
+        .bulk-action-row button { flex:1;height:40px;min-height:40px;font-size:13px;margin-bottom:0; }
+
+        .day-btn-row { display:flex;gap:10px;margin-bottom:16px; }
+        .day-btn-row .btn-secondary { flex:1;height:42px;min-height:42px;margin-bottom:0;font-size:13px; }
+
+        .admin-section { margin-top:16px;border-top:2px solid var(--border);padding-top:14px; }
+        .menu-divider { height:1px;background:var(--border);margin:14px 0; }
+
+        .badge { display:none;background:var(--absent);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;font-weight:700;line-height:20px;text-align:center;margin-left:6px;animation:pulse 2s infinite;vertical-align:middle;align-items:center;justify-content:center; }
+
+        .directory-item { background:var(--input);padding:14px;border-radius:10px;margin-bottom:10px;border:2px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;transition:all 0.2s ease; }
+        .directory-item:hover { border-color:var(--gold); }
+        .directory-info { flex:1; }
+        .directory-name { font-weight:700;color:var(--text);font-size:14px; }
+        .directory-email { font-size:12px;color:var(--text);opacity:0.6;margin-top:3px; }
+
+        .btn-icon { background:transparent;border:2px solid var(--border);color:var(--text);width:36px;height:36px;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.2s ease;display:flex;align-items:center;justify-content:center;flex-shrink:0; }
+        .btn-icon:hover { border-color:var(--absent);color:var(--absent);background:rgba(220,53,69,0.05); }
+
+        .copy-feedback { position:fixed;bottom:30px;right:20px;background:var(--present);color:white;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:600;animation:slideUp 0.3s ease;z-index:1000; }
+
+        .btn-subbed { background:transparent;border:1.5px dashed var(--gold);color:var(--gold);padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.2s ease;white-space:nowrap;flex-shrink:0; }
+        .btn-subbed:hover { background:rgba(184,134,11,0.1);border-style:solid; }
+
+        .subbed-modal { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:2000;padding:20px;animation:fadeIn 0.2s ease; }
+        .subbed-modal-content { background:var(--card-bg);border-radius:12px;padding:20px;width:100%;max-width:320px;border:2px solid var(--gold);box-shadow:0 10px 40px var(--shadow-hover);animation:scaleIn 0.25s ease; }
+        .subbed-modal-content h4 { margin:0 0 12px;color:var(--gold);font-size:14px;font-weight:700; }
+        .modal-buttons { display:flex;gap:8px;flex-wrap:wrap;margin-top:12px; }
+        .modal-buttons button { flex:1;min-width:70px;min-height:40px;border-radius:8px;border:none;font-weight:600;cursor:pointer;transition:all 0.2s ease;font-size:13px; }
+        .btn-confirm { background:var(--present);color:white; }
+        .btn-cancel { background:var(--border);color:var(--text); }
+
+        .link-btn { background:none;border:none;color:var(--gold);font-size:13px;font-weight:600;cursor:pointer;padding:0;text-decoration:underline;width:auto;display:inline;font-family:inherit; }
+        .link-btn:hover { color:var(--gold-light); }
+
+        form p { text-align:center;font-size:13px;margin:12px 0; }
+        a { color:var(--gold);text-decoration:none;font-weight:600;transition:color 0.2s ease; }
+        a:hover { color:var(--gold-light); }
+
+        .subbed-info-tag { margin-top:8px;padding:7px 10px;background:rgba(184,134,11,0.1);border-radius:6px;display:none;font-size:12px;color:var(--gold);font-weight:600; }
+        #meeting-full-list { margin-top:4px; }
+
+        .group-title-divider { display:flex;align-items:center;gap:12px;margin:0 0 22px; }
+        .group-title-divider .line { flex:1;height:2px;background:linear-gradient(to right,transparent,var(--gold),transparent);border-radius:2px; }
+        .group-title-divider .title-text { font-size:15px;font-weight:700;color:var(--gold);white-space:nowrap;letter-spacing:0.5px; }
+
+        .group-member-edit { background:var(--input);padding:14px;border-radius:12px;margin-bottom:10px;border:2px solid var(--border); }
+        .group-member-edit-header { font-weight:700;color:var(--gold);margin-bottom:12px;font-size:14px; }
+        .member-edit-row { display:flex;gap:8px;margin-bottom:8px;align-items:center; }
+        .member-edit-row input { flex:1;margin-bottom:0; }
+        .member-edit-row .btn-icon { width:32px;height:32px;padding:0; }
+
+        .role-select-inline { font-size:11px;padding:4px 8px;height:auto;min-height:auto;margin:0;border-radius:6px;width:auto;cursor:pointer; }
+
+        /* CONCERNS */
+        .concern-item { background:var(--input);padding:16px;border-radius:12px;margin-bottom:12px;border:2px solid var(--border);transition:all 0.2s ease;animation:fadeInUp 0.4s ease; }
+        .concern-item:hover { border-color:var(--gold);box-shadow:0 2px 8px var(--shadow); }
+        .concern-header { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
+        .concern-cat { font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:0.5px; }
+        .cat-suggestion { background:rgba(40,167,69,0.15);color:var(--present); }
+        .cat-concern { background:rgba(230,126,34,0.15);color:var(--warning-orange); }
+        .cat-bullying { background:rgba(220,53,69,0.15);color:var(--absent); }
+        .cat-complaint { background:rgba(220,53,69,0.15);color:var(--absent); }
+        .cat-praise { background:rgba(184,134,11,0.15);color:var(--gold); }
+        .cat-other { background:rgba(100,100,100,0.15);color:var(--text); }
+        .concern-date { font-size:11px;opacity:0.6; }
+        .concern-from { font-size:12px;margin-bottom:6px;opacity:0.8; }
+        .concern-msg { font-size:13px;line-height:1.6;color:var(--text); }
+        .concern-tabs { display:flex;gap:8px;margin-bottom:16px; }
+        .concern-tabs button { flex:1;height:40px;min-height:40px;margin-bottom:0;font-size:13px; }
+
+        .concern-success-box { text-align:center;padding:30px 10px;animation:floatUp 0.6s ease; }
+        .concern-success-icon { font-size:64px;display:block;margin-bottom:16px;animation:bounceIn 0.6s ease; }
+
+        /* WARNINGS PANEL - PROPERLY FIXED */
+        .warning-member-row { 
+            padding:14px; border-radius:12px; margin-bottom:10px; border:2px solid; 
+            transition:all 0.3s ease; animation:fadeInUp 0.4s ease; 
         }
-        .group-grid .btn-secondary { margin-bottom: 0; }
-
-        .success-image {
-            width: 140px; height: 140px;
-            border-radius: 50%;
-            border: 4px solid var(--gold);
-            margin-bottom: 20px;
-            box-shadow: 0 8px 24px var(--shadow);
-            animation: scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        .warning-row-header { 
+            display:flex; justify-content:space-between; align-items:center; gap:8px; 
+            margin-bottom:8px; flex-wrap:wrap; 
         }
-
-        h2, h3 { color: var(--text); margin-top: 0; transition: color 0.3s ease; }
-        h2 { font-size: 24px; font-weight: 700; text-align: center; }
-        h3 { font-size: 18px; font-weight: 600; color: var(--gold); }
-
-        .welcome-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 22px;
-            border-bottom: 2px solid var(--border);
-            padding-bottom: 16px;
-            gap: 12px;
-            flex-wrap: wrap;
+        .warning-row-header strong { 
+            word-break:break-word; flex:1; min-width:0; 
         }
-        #welcome-msg { font-size: 14px; font-weight: 700; color: var(--text); }
-
-        .time-group { display: flex; gap: 10px; margin-bottom: 12px; }
-        .time-group input { flex: 1; margin-bottom: 0; }
-
-        /* FOOTER - triangle form */
-        .footer {
-            width: 100%;
-            text-align: center;
-            font-size: 11px;
-            color: var(--text);
-            opacity: 0.6;
-            padding: 28px 10px;
-            line-height: 2;
-            border-top: 2px solid var(--border);
-            margin-top: 20px;
-            transition: opacity 0.3s ease;
+        .warning-status-badge { 
+            font-size:11px; font-weight:700; padding:3px 8px; border-radius:12px; 
+            border:1px solid; white-space:nowrap; flex-shrink:0; 
         }
-        .footer:hover { opacity: 0.8; }
-        .footer-line1 { font-size: 12px; font-weight: 600; }
-        .footer-line2 { font-size: 11px; }
-        .footer-line3 { font-size: 11px; }
-        .footer-line4 { font-size: 10px; opacity: 0.5; }
-
-        .attendance-counter {
-            position: sticky;
-            top: 0;
-            background: var(--card-bg);
-            border: 2px solid var(--gold);
-            border-radius: 10px;
-            padding: 14px 16px;
-            margin-bottom: 16px;
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            gap: 10px;
-            z-index: 10;
-            box-shadow: 0 2px 8px var(--shadow);
+        .warning-status-select { 
+            width:100%; padding:8px 10px; font-size:13px !important; height:auto !important; 
+            min-height:36px !important; border:2px solid var(--border) !important; 
+            background:var(--input) !important; color:var(--text) !important; 
+            border-radius:6px !important; margin:0 !important; 
         }
-        .counter-item { text-align: center; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-        .counter-item .label { font-size: 11px; color: var(--gold); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin: 0; line-height: 1; }
-        .counter-item .count { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1; }
-        .counter-item.present .count { color: var(--present); }
-        .counter-item.absent .count { color: var(--absent); }
-        .counter-divider { width: 1px; height: 36px; background: var(--border); flex-shrink: 0; }
-
-        .btn-copy-report {
-            width: 100%;
-            min-height: 48px;
-            background: var(--gold);
-            color: var(--card-bg);
-            border: 2px solid var(--gold);
-            margin-bottom: 12px;
-            font-weight: 700;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.25s ease;
-            margin-top: 10px;
-            font-size: 14px;
-            font-family: inherit;
+        .warning-status-select option { 
+            padding:8px; font-size:13px; 
         }
-        .btn-copy-report:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(184, 134, 11, 0.3);
-            background: var(--gold-light);
-            border-color: var(--gold-light);
+        .warning-btn-reset,
+        .warning-btn-warn { 
+            height:36px; padding:0 12px; border:2px solid var(--border); 
+            border-radius:6px; background:transparent; color:var(--text); 
+            font-size:11px; cursor:pointer; white-space:nowrap; flex-shrink:0;
+            transition:all 0.2s ease;
         }
-
-        .meeting-group-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin: 18px 0 12px;
+        .warning-btn-reset:hover { 
+            border-color:var(--border); color:var(--text); background:rgba(0,0,0,0.05);
         }
-        .meeting-group-header span.line { flex: 1; height: 1px; background: var(--border); }
-        .meeting-group-header span.label { font-weight: 700; color: var(--gold); font-size: 12px; text-transform: uppercase; padding: 0 8px; letter-spacing: 0.5px; }
-
-        .member-check-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 14px;
-            background: var(--input);
-            border: 2px solid var(--border);
-            border-radius: 10px;
-            margin-bottom: 8px;
-            transition: all 0.2s ease;
-            cursor: pointer;
+        .warning-btn-warn { 
+            border-color:var(--accent); color:var(--accent); font-weight:700;
         }
-        .member-check-item:hover { border-color: var(--gold); box-shadow: 0 2px 8px var(--shadow); }
-        .member-check-item input[type="checkbox"] {
-            width: 22px; height: 22px;
-            margin: 0 12px 0 0;
-            accent-color: var(--present);
-            cursor: pointer;
-            flex-shrink: 0;
-        }
-        .member-check-item .member-name { font-weight: 600; color: var(--text); font-size: 13px; flex: 1; }
-        .member-check-item .check-status { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 20px; transition: all 0.2s ease; }
-        .check-status.present { background: rgba(40,167,69,0.12); color: var(--present); }
-        .check-status.absent { background: rgba(220,53,69,0.10); color: var(--absent); }
-
-        .mtg-reason-box {
-            display: none;
-            padding: 10px 12px;
-            background: rgba(220, 53, 69, 0.04);
-            border-left: 3px solid var(--absent);
-            border-radius: 0 8px 8px 0;
-            margin: 6px 0 0 34px;
-            animation: slideDown 0.2s ease;
-        }
-        .mtg-reason-box select, .mtg-reason-box input { margin-bottom: 8px; }
-        .mtg-reason-box select:last-child, .mtg-reason-box input:last-child { margin-bottom: 0; }
-
-        .bulk-action-row { display: flex; gap: 8px; margin-bottom: 12px; }
-        .bulk-action-row button { flex: 1; height: 40px; min-height: 40px; font-size: 13px; margin-bottom: 0; }
-
-        .day-btn-row { display: flex; gap: 10px; margin-bottom: 16px; }
-        .day-btn-row .btn-secondary { flex: 1; height: 42px; min-height: 42px; margin-bottom: 0; font-size: 13px; }
-
-        .admin-section { margin-top: 16px; border-top: 2px solid var(--border); padding-top: 14px; }
-
-        /* BADGE */
-        .badge {
-            display: none;
-            background: var(--absent);
-            color: white;
-            border-radius: 50%;
-            width: 20px; height: 20px;
-            font-size: 10px;
-            font-weight: 700;
-            line-height: 20px;
-            text-align: center;
-            margin-left: 6px;
-            animation: pulse 2s infinite;
-            vertical-align: middle;
-            align-items: center;
-            justify-content: center;
+        .warning-btn-warn:hover { 
+            background:rgba(163,0,0,0.1);
         }
 
-        /* DIRECTORY */
-        .directory-item {
-            background: var(--input);
-            padding: 14px;
-            border-radius: 10px;
-            margin-bottom: 10px;
-            border: 2px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            transition: all 0.2s ease;
-        }
-        .directory-item:hover { border-color: var(--gold); }
-        .directory-info { flex: 1; }
-        .directory-name { font-weight: 700; color: var(--text); font-size: 14px; }
-        .directory-email { font-size: 12px; color: var(--text); opacity: 0.6; margin-top: 3px; }
-
-        .btn-icon {
-            background: transparent;
-            border: 2px solid var(--border);
-            color: var(--text);
-            width: 36px; height: 36px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-        .btn-icon:hover { border-color: var(--absent); color: var(--absent); background: rgba(220, 53, 69, 0.05); }
-
-        .copy-feedback {
-            position: fixed;
-            bottom: 30px; right: 20px;
-            background: var(--present);
-            color: white;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 600;
-            animation: slideUp 0.3s ease;
-            z-index: 1000;
-        }
-
-        .btn-subbed {
-            background: transparent;
-            border: 1.5px dashed var(--gold);
-            color: var(--gold);
-            padding: 6px 10px;
-            border-radius: 6px;
-            font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        .btn-subbed:hover { background: rgba(184, 134, 11, 0.1); border-style: solid; }
-
-        .subbed-modal {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-            padding: 20px;
-            animation: fadeIn 0.2s ease;
-        }
-        .subbed-modal-content {
-            background: var(--card-bg);
-            border-radius: 12px;
-            padding: 20px;
-            width: 100%;
-            max-width: 320px;
-            border: 2px solid var(--gold);
-            box-shadow: 0 10px 40px var(--shadow-hover);
-            animation: scaleIn 0.25s ease;
-        }
-        .subbed-modal-content h4 { margin: 0 0 12px; color: var(--gold); font-size: 14px; font-weight: 700; }
-        .modal-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-        .modal-buttons button {
-            flex: 1;
-            min-width: 70px; min-height: 40px;
-            border-radius: 8px;
-            border: none;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-size: 13px;
-        }
-        .btn-confirm { background: var(--present); color: white; }
-        .btn-cancel { background: var(--border); color: var(--text); }
-
-        .link-btn {
-            background: none;
-            border: none;
-            color: var(--gold);
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            padding: 0;
-            text-decoration: underline;
-            width: auto;
-            display: inline;
-            font-family: inherit;
-        }
-        .link-btn:hover { color: var(--gold-light); }
-
-        form p { text-align: center; font-size: 13px; margin: 12px 0; }
-        a { color: var(--gold); text-decoration: none; font-weight: 600; transition: color 0.2s ease; }
-        a:hover { color: var(--gold-light); }
-
-        .subbed-info-tag {
-            margin-top: 8px;
-            padding: 7px 10px;
-            background: rgba(184, 134, 11, 0.1);
-            border-radius: 6px;
-            display: none;
-            font-size: 12px;
-            color: var(--gold);
-            font-weight: 600;
-        }
-
-        #meeting-full-list { margin-top: 4px; }
-
-        .group-title-divider {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin: 0 0 22px;
-        }
-        .group-title-divider .line { flex: 1; height: 2px; background: linear-gradient(to right, transparent, var(--gold), transparent); border-radius: 2px; }
-        .group-title-divider .title-text { font-size: 15px; font-weight: 700; color: var(--gold); white-space: nowrap; letter-spacing: 0.5px; }
-
-        .group-member-edit { background: var(--input); padding: 14px; border-radius: 12px; margin-bottom: 10px; border: 2px solid var(--border); }
-        .group-member-edit-header { font-weight: 700; color: var(--gold); margin-bottom: 12px; font-size: 14px; }
-        .member-edit-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
-        .member-edit-row input { flex: 1; margin-bottom: 0; }
-        .member-edit-row .btn-icon { width: 32px; height: 32px; padding: 0; }
-
-        .history-item {
-            background: var(--input);
-            padding: 12px 14px;
-            border-radius: 10px;
-            margin-bottom: 8px;
-            border-left: 4px solid var(--border);
-            font-size: 13px;
-        }
-        .history-item.present { border-left-color: var(--present); }
-        .history-item.absent { border-left-color: var(--absent); }
-        .history-date { font-weight: 700; color: var(--gold); display: block; margin-bottom: 3px; }
-        .history-status { display: inline-block; padding: 2px 6px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-        .history-status.present { background: rgba(40,167,69,0.15); color: var(--present); }
-        .history-status.absent { background: rgba(220,53,69,0.15); color: var(--absent); }
-
-        /* MENU SECTION DIVIDERS */
-        .menu-section-label {
-            font-size: 10px;
-            font-weight: 700;
-            color: var(--gold);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin: 16px 0 8px;
-            opacity: 0.75;
-        }
-        .menu-divider { height: 1px; background: var(--border); margin: 14px 0; }
-
-        /* ROLE SELECT IN DIRECTORY */
-        .role-select-inline {
-            font-size: 11px;
-            padding: 4px 8px;
-            height: auto;
-            min-height: auto;
-            margin: 0;
-            border-radius: 6px;
-            width: auto;
-            cursor: pointer;
-        }
-
-        @media (max-width: 480px) {
-            .portal-container { width: 96%; padding: 18px 16px; }
-            .group-grid { grid-template-columns: 1fr; }
-            .btn-primary, .btn-secondary { min-height: 46px; font-size: 13px; }
-            h2 { font-size: 20px; }
-            input, textarea, select { font-size: 16px; }
-            .logo-side { width: 52px; height: 52px; }
-            .logo-center { width: 78px; height: 78px; }
+        @media (max-width:480px) {
+            .portal-container { width:96%;padding:18px 16px; }
+            .group-grid { grid-template-columns:1fr; }
+            .btn-primary,.btn-secondary { min-height:46px;font-size:13px; }
+            h2 { font-size:20px; }
+            input,textarea,select { font-size:16px; }
+            .logo-side { width:52px;height:52px; }
+            .logo-center { width:78px;height:78px; }
+            .warning-row-header { flex-direction:column; align-items:flex-start; }
+            .warning-status-badge { align-self:flex-start; }
         }
     </style>
 </head>
@@ -884,42 +671,36 @@
 
 <header>
     <div class="logo-row">
-        <div class="logo-col">
-            <img src="https://i.postimg.cc/Kjm7g1PN/image-removebg-preview.png" class="logo-side" alt="Diocese Logo">
-        </div>
-        <div class="logo-col">
-            <img src="https://i.postimg.cc/9F9mNBQY/1736098066071.png" class="logo-center" alt="Ministry Logo">
-        </div>
-        <div class="logo-col">
-            <img src="https://i.postimg.cc/tT3tT3xg/Photoroom-20250124-172559.png" class="logo-side" alt="Parish Logo">
-        </div>
+        <div class="logo-col"><img src="https://i.postimg.cc/Kjm7g1PN/image-removebg-preview.png" class="logo-side" alt="Diocese Logo"></div>
+        <div class="logo-col"><img src="https://i.postimg.cc/9F9mNBQY/1736098066071.png" class="logo-center" alt="Ministry Logo"></div>
+        <div class="logo-col"><img src="https://i.postimg.cc/tT3tT3xg/Photoroom-20250124-172559.png" class="logo-side" alt="Parish Logo"></div>
     </div>
     <div class="motto">"Ut in omnibus glorificetur Deus"</div>
 </header>
 
 <div class="portal-container">
 
-    <!-- LOGIN SECTION -->
+    <!-- LOGIN -->
     <section id="login-section" class="section active">
         <h2>Ministry Login</h2>
         <input type="text" id="login-email" placeholder="Email Address or Username" autocomplete="username">
         <input type="password" id="login-pass" placeholder="Password" autocomplete="current-password">
         <button class="btn-primary" onclick="handleLogin()">Sign In</button>
-        <p>New? <a href="#" onclick="showSection('register-section'); return false;">Register here</a></p>
+        <p>New? <a href="#" onclick="showSection('register-section');return false;">Register here</a></p>
         <p><button class="link-btn" onclick="showSection('forgot-section')">Forgot password?</button></p>
     </section>
 
-    <!-- FORGOT PASSWORD SECTION -->
+    <!-- FORGOT PASSWORD -->
     <section id="forgot-section" class="section">
         <h2>Password Reset</h2>
-        <p style="font-size: 13px; opacity: 0.75; text-align: center;">Enter your email or username. A reset link will be sent and the admin will be notified.</p>
+        <p style="font-size:13px;opacity:0.75;text-align:center;">Enter your email or username. A reset link will be sent and the admin will be notified.</p>
         <label>Email or Username</label>
         <input type="text" id="forgot-identifier" placeholder="your@email.com or username">
         <button class="btn-primary" onclick="handleForgotPassword()">Send Reset Request</button>
         <button class="btn-secondary" onclick="showSection('login-section')">← Back to Login</button>
     </section>
 
-    <!-- REGISTRATION SECTION -->
+    <!-- REGISTRATION -->
     <section id="register-section" class="section">
         <h2>Registration</h2>
         <input type="text" id="reg-name" placeholder="Full Name" autocomplete="name">
@@ -930,47 +711,42 @@
         <button class="btn-secondary" onclick="showSection('login-section')">← Back</button>
     </section>
 
-    <!-- PENDING APPROVAL SECTION -->
-    <section id="pending-section" class="section" style="text-align: center;">
-        <h2 style="color: var(--gold); margin-bottom: 10px;">Verification Pending</h2>
-        <p style="font-size: 14px; opacity: 0.8;">Your registration is awaiting admin approval. Please check back soon.</p>
-        <button class="btn-logout" style="margin-top: 20px; width: 100%;" onclick="handleLogout()">Logout</button>
+    <!-- PENDING APPROVAL -->
+    <section id="pending-section" class="section" style="text-align:center;">
+        <h2 style="color:var(--gold);margin-bottom:10px;">Verification Pending</h2>
+        <p style="font-size:14px;opacity:0.8;">Your registration is awaiting admin approval. Please check back soon.</p>
+        <button class="btn-logout" style="margin-top:20px;width:100%;" onclick="handleLogout()">Logout</button>
     </section>
 
-    <!-- MAIN MENU SECTION -->
+    <!-- MAIN MENU -->
     <section id="main-menu" class="section">
         <div class="welcome-header">
             <span id="welcome-msg"></span>
             <button class="btn-logout" onclick="handleLogout()">Logout</button>
         </div>
-
-        <!-- Serve History: visible to all roles -->
         <button id="history-btn" class="btn-secondary" onclick="showSection('serve-history')" style="display:none;">📊 Serve History</button>
-
-        <!-- Submit Attendance: admin + group_leader -->
         <button id="attend-btn" class="btn-secondary" onclick="showSection('group-select')" style="display:none;">📋 Submit Attendance</button>
-
-        <!-- Meeting Log: admin + group_leader -->
         <button id="meeting-btn" class="btn-secondary" onclick="showSection('meeting-form')" style="display:none;">📝 Meeting Log</button>
-
-        <!-- Admin-only -->
-        <div id="admin-gate" style="display: none;" class="admin-section">
+        <button id="concern-btn" class="btn-secondary" onclick="showSection('concern-form')" style="display:none;">💬 Concerns &amp; Feedback</button>
+        <div id="admin-gate" style="display:none;" class="admin-section">
             <div class="menu-divider"></div>
-            <button class="btn-secondary" style="border-color: var(--gold); color: var(--gold);" onclick="showSection('group-members-panel')">👥 Group Members</button>
-            <button class="btn-secondary" style="border-color: var(--gold); color: var(--gold);" onclick="showSection('member-directory')">📇 Member Directory</button>
-            <button class="btn-secondary" style="border-color: var(--gold); color: var(--gold);" onclick="showSection('admin-panel')">👤 Pending Approvals <span class="badge" id="pending-badge"></span></button>
-            <button class="btn-secondary" style="border-color: var(--gold); color: var(--gold); margin-bottom:0;" onclick="showSection('pw-requests-panel')">🔑 Password Requests <span class="badge" id="pw-request-badge"></span></button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('group-members-panel')">👥 Group Members</button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('member-directory')">📇 Member Directory</button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('admin-panel')">👤 Pending Approvals <span class="badge" id="pending-badge"></span></button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('pw-requests-panel')">🔑 Password Requests <span class="badge" id="pw-request-badge"></span></button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('concerns-admin-panel')">📨 Concerns &amp; Feedback <span class="badge" id="concerns-badge"></span></button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);margin-bottom:0;" onclick="showSection('warnings-panel')">⚠️ Activity Warnings</button>
         </div>
     </section>
 
-    <!-- GROUP SELECTION SECTION -->
+    <!-- GROUP SELECT -->
     <section id="group-select" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Menu</button>
-        <h3 style="text-align: center; margin-bottom: 20px;">Select Serving Group</h3>
+        <h3 style="text-align:center;margin-bottom:20px;">Select Serving Group</h3>
         <div class="group-grid" id="group-buttons"></div>
     </section>
 
-    <!-- ATTENDANCE FORM SECTION -->
+    <!-- ATTENDANCE FORM -->
     <section id="serve-form" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('group-select')">← Back</button>
         <div class="group-title-divider">
@@ -982,20 +758,17 @@
             <input type="hidden" name="access_key" value="3c07afcf-f54e-442d-8d8b-50772a3fb05e">
             <input type="hidden" name="attendance_report" id="hidden-report">
             <input type="hidden" name="mass_schedule_final" id="hidden-final-sched">
-
             <label>Service Day</label>
             <div class="day-btn-row">
-                <button type="button" class="btn-secondary day-btn" onclick="setDay('Saturday', this)">Saturday</button>
-                <button type="button" class="btn-secondary day-btn" onclick="setDay('Sunday', this)">Sunday</button>
-                <button type="button" class="btn-secondary day-btn" onclick="setDay('Other', this)">Other</button>
+                <button type="button" class="btn-secondary day-btn" onclick="setDay('Saturday',this)">Saturday</button>
+                <button type="button" class="btn-secondary day-btn" onclick="setDay('Sunday',this)">Sunday</button>
+                <button type="button" class="btn-secondary day-btn" onclick="setDay('Other',this)">Other</button>
             </div>
-
-            <div id="mass-time-selector" style="display: none;">
-                <label id="date-display" style="font-size: 11px; opacity: 0.7; margin: 0 0 8px;"></label>
+            <div id="mass-time-selector" style="display:none;">
+                <label id="date-display" style="font-size:11px;opacity:0.7;margin:0 0 8px;"></label>
                 <select id="mass-schedule-dropdown" onchange="updateFinalSched()"></select>
             </div>
-
-            <div id="special-event-fields" style="display: none;">
+            <div id="special-event-fields" style="display:none;">
                 <label>Special Event</label>
                 <input type="text" id="special-name" placeholder="Event (e.g., Wedding, Funeral)" oninput="updateFinalSched()">
                 <div class="time-group">
@@ -1003,258 +776,262 @@
                     <input type="time" id="special-time" onchange="updateFinalSched()">
                 </div>
             </div>
-
             <label>Attendance Checklist</label>
             <div class="bulk-action-row">
                 <button type="button" class="btn-secondary" onclick="setAllPresent()">✓ All Present</button>
                 <button type="button" class="btn-secondary" onclick="setAllAbsent()">✗ All Absent</button>
             </div>
             <div class="attendance-counter">
-                <div class="counter-item present">
-                    <span class="label">Present</span>
-                    <span class="count" id="present-count">0</span>
-                </div>
+                <div class="counter-item present"><span class="label">Present</span><span class="count" id="present-count">0</span></div>
                 <div class="counter-divider"></div>
-                <div class="counter-item absent" id="absent-counter-item">
-                    <span class="label">Absent</span>
-                    <span class="count" id="absent-count">0</span>
-                </div>
+                <div class="counter-item absent" id="absent-counter-item"><span class="label">Absent</span><span class="count" id="absent-count">0</span></div>
             </div>
             <div id="checklist-container"></div>
-
             <label>Notes:</label>
             <textarea name="closing_notes" placeholder="Observations or remarks..."></textarea>
-
             <button type="submit" class="btn-primary">Submit Records</button>
         </form>
     </section>
 
-    <!-- MEETING LOG SECTION -->
+    <!-- MEETING LOG -->
     <section id="meeting-form" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
-        <h3 style="text-align: center; margin: 0 0 18px;">Meeting Attendance</h3>
+        <h3 style="text-align:center;margin:0 0 18px;">Meeting Attendance</h3>
         <form id="form-meeting">
             <input type="hidden" name="access_key" value="48094da2-45b4-4aca-8aca-ab6a464acad3">
-
             <label>Meeting Type</label>
             <select name="meeting_category" id="meeting-type" onchange="toggleMtgOther(this.value)">
-                <option>Monthly Meeting</option>
-                <option>General Assembly</option>
-                <option>Weekly Briefing</option>
-                <option>Emergency Meeting</option>
-                <option>Formation / Training</option>
-                <option>Special Event</option>
+                <option>Monthly Meeting</option><option>General Assembly</option>
+                <option>Weekly Briefing</option><option>Emergency Meeting</option>
+                <option>Formation / Training</option><option>Special Event</option>
                 <option value="Other">Other...</option>
             </select>
-            <input type="text" id="mtg-other-input" name="specified_other_type" placeholder="Please specify meeting type" style="display: none;">
-
+            <input type="text" id="mtg-other-input" name="specified_other_type" placeholder="Please specify meeting type" style="display:none;">
             <label>Recording Officer</label>
             <input type="text" id="officer-name-input" name="officer_name" placeholder="Full Name">
-
             <label>Date &amp; Time</label>
             <div class="time-group">
                 <input type="date" id="mtg-date-input" name="mtg_date">
                 <input type="time" id="mtg-time-input" name="mtg_time">
             </div>
-
             <label>Attendance</label>
-            <div class="bulk-action-row" style="margin-bottom: 10px;">
+            <div class="bulk-action-row" style="margin-bottom:10px;">
                 <button type="button" class="btn-secondary" onclick="setMtgAllPresent()">✓ All Present</button>
                 <button type="button" class="btn-secondary" onclick="setMtgAllAbsent()">✗ All Absent</button>
             </div>
             <div class="attendance-counter" id="mtg-counter">
-                <div class="counter-item present">
-                    <span class="label">Present</span>
-                    <span class="count" id="mtg-present-count">0</span>
-                </div>
+                <div class="counter-item present"><span class="label">Present</span><span class="count" id="mtg-present-count">0</span></div>
                 <div class="counter-divider"></div>
-                <div class="counter-item absent">
-                    <span class="label">Absent</span>
-                    <span class="count" id="mtg-absent-count">0</span>
-                </div>
+                <div class="counter-item absent"><span class="label">Absent</span><span class="count" id="mtg-absent-count">0</span></div>
             </div>
             <div id="meeting-full-list"></div>
             <input type="hidden" id="meeting-attendees-hidden" name="attendance_list">
-
             <label>Notes</label>
             <textarea name="meeting_notes" placeholder="Key points, decisions, announcements..."></textarea>
-
             <button type="submit" class="btn-primary">Submit Log</button>
         </form>
     </section>
 
-    <!-- SERVE HISTORY SECTION -->
+    <!-- SERVE HISTORY -->
     <section id="serve-history" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Menu</button>
-        <h3 style="text-align: center; margin-bottom: 18px;">Serve History</h3>
+        <h3 style="text-align:center;margin-bottom:18px;">Serve History</h3>
         <div id="history-group-list" class="group-grid"></div>
-        <div id="history-member-section" style="display: none; margin-top: 16px;">
+        <div id="history-member-section" style="display:none;margin-top:16px;">
             <button class="btn-secondary btn-sm-nav" onclick="showHistoryGroups()">← Change Group</button>
             <div id="history-members-list"></div>
         </div>
-        <div id="history-detail-section" style="display: none; margin-top: 16px;">
+        <div id="history-detail-section" style="display:none;margin-top:16px;">
             <button class="btn-secondary btn-sm-nav" onclick="showHistoryMembers()">← Members</button>
-            <h3 id="history-member-title" style="text-align: center; margin: 10px 0 16px;"></h3>
+            <h3 id="history-member-title" style="text-align:center;margin:10px 0 16px;"></h3>
             <div id="history-record-list"></div>
         </div>
     </section>
 
-    <!-- SUCCESS SECTION -->
-    <section id="success" class="section" style="text-align: center; padding: 20px 0;">
+    <!-- CONCERNS & FEEDBACK FORM -->
+    <section id="concern-form" class="section">
+        <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
+        <h3 style="text-align:center;margin:0 0 6px;">Concerns &amp; Feedback</h3>
+        <p style="font-size:12px;opacity:0.7;text-align:center;margin-bottom:20px;">Your voice matters. Share your thoughts, concerns, or suggestions with the executive officers.</p>
+        <label>Your Name <span style="font-weight:400;font-size:11px;opacity:0.6;">(optional — leave blank to stay anonymous)</span></label>
+        <input type="text" id="concern-name" placeholder="Your name (optional)">
+        <label>Category</label>
+        <select id="concern-category">
+            <option value="Suggestion">💡 Suggestion</option>
+            <option value="Concern">⚠️ Concern</option>
+            <option value="Bullying">🚨 Bullying / Misconduct</option>
+            <option value="Complaint">📢 Complaint</option>
+            <option value="Praise">🌟 Praise / Commendation</option>
+            <option value="Other">📝 Other</option>
+        </select>
+        <label>Your Message <span style="color:var(--absent);">*</span></label>
+        <textarea id="concern-message" placeholder="Write your concern or feedback here..." style="min-height:130px;"></textarea>
+        <button id="concern-submit-btn" class="btn-primary" onclick="submitConcern()">Send Message</button>
+        <button class="btn-secondary" onclick="showSection('main-menu')">Cancel</button>
+    </section>
+
+    <!-- CONCERN SUCCESS -->
+    <section id="concern-success" class="section">
+        <div class="concern-success-box">
+            <span class="concern-success-icon">🙏</span>
+            <h2 style="color:var(--gold);margin-bottom:8px;">Thank You!</h2>
+            <p style="font-size:14px;line-height:1.6;margin-bottom:8px;">Your message has been received.</p>
+            <p style="font-size:13px;opacity:0.75;line-height:1.6;margin-bottom:24px;">The executive officers will review and handle your concern with care and confidentiality.</p>
+            <button class="btn-primary" onclick="returnHome();document.getElementById('concern-name').value='';document.getElementById('concern-message').value='';document.getElementById('concern-submit-btn').disabled=false;document.getElementById('concern-submit-btn').textContent='Send Message';">Return Home</button>
+        </div>
+    </section>
+
+    <!-- SUCCESS -->
+    <section id="success" class="section" style="text-align:center;padding:20px 0;">
         <img src="https://imgs.search.brave.com/OQgS9eektGozBD6SRzUZe0U_7fyOZaXQwy5OVlrAUH4/rs:fit:860:0:0:0/g:ce/aHR0cDovL2NhdGhv/bGljc2FpbnRzLmlu/Zm8vd3AtY29udGVu/dC91cGxvYWRzL2lt/Zy1TYWludC1UYXJj/aXNpdXMuanBn" class="success-image" alt="Success">
-        <h2 style="color: var(--gold); margin-bottom: 5px;">Attendance of your group is Successfully Submitted!</h2>
-        <p style="font-size: 13px; opacity: 0.8; margin-bottom: 20px;">Amare Et Servire Domino!</p>
+        <h2 style="color:var(--gold);margin-bottom:5px;">Attendance of your group is Successfully Submitted!</h2>
+        <p style="font-size:13px;opacity:0.8;margin-bottom:20px;">Amare Et Servire Domino!</p>
         <button class="btn-copy-report" id="copy-report-btn" onclick="copyReportToClipboard()">📋 Copy Report for GC</button>
         <button class="btn-primary" onclick="returnHome()">Return Home</button>
     </section>
 
-    <!-- ADMIN PANEL SECTION -->
+    <!-- ADMIN PANEL -->
     <section id="admin-panel" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
         <h3>Pending Approvals</h3>
         <div id="pending-users-list"></div>
     </section>
 
-    <!-- PASSWORD REQUESTS PANEL -->
+    <!-- PASSWORD REQUESTS -->
     <section id="pw-requests-panel" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
         <h3>Password Reset Requests</h3>
-        <div id="pw-requests-list"><p style="font-size:13px; opacity:0.6;">No pending requests.</p></div>
+        <div id="pw-requests-list"><p style="font-size:13px;opacity:0.6;">No pending requests.</p></div>
     </section>
 
-    <!-- GROUP MEMBERS MANAGEMENT SECTION -->
+    <!-- CONCERNS ADMIN PANEL -->
+    <section id="concerns-admin-panel" class="section">
+        <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
+        <h3>Concerns &amp; Feedback Messages</h3>
+        <div class="concern-tabs">
+            <button id="concern-tab-open" class="btn-secondary" style="border-color:var(--gold);" onclick="loadConcerns('open')">📬 Open</button>
+            <button id="concern-tab-resolved" class="btn-secondary" onclick="loadConcerns('resolved')">✓ Resolved</button>
+        </div>
+        <div id="concerns-admin-list"><p style="font-size:12px;opacity:0.6;">Loading...</p></div>
+    </section>
+
+    <!-- GROUP MEMBERS MANAGEMENT -->
     <section id="group-members-panel" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
         <h3>Edit Group Members</h3>
-        <p style="font-size: 13px; opacity: 0.7; margin-bottom: 16px;">Add, remove, or edit member names in each group.</p>
+        <p style="font-size:13px;opacity:0.7;margin-bottom:16px;">Add, remove, or edit member names in each group.</p>
         <div id="group-members-container"></div>
     </section>
 
-    <!-- MEMBER DIRECTORY SECTION -->
+    <!-- MEMBER DIRECTORY -->
     <section id="member-directory" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
         <h3>Approved Servers Directory</h3>
         <div id="approved-members-list"></div>
     </section>
+
+    <!-- WARNINGS PANEL -->
+    <section id="warnings-panel" class="section">
+        <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
+        <h3>⚠️ Activity Warnings</h3>
+        <p style="font-size:13px;opacity:0.7;margin-bottom:16px;">Track server attendance and send warnings to inactive members.</p>
+        <div id="warnings-group-view">
+            <p style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:10px;">Select a group to review:</p>
+            <div id="warnings-group-list" class="group-grid"></div>
+        </div>
+        <div id="warnings-detail-view" style="display:none;">
+            <button class="btn-secondary btn-sm-nav" onclick="document.getElementById('warnings-group-view').style.display='block';document.getElementById('warnings-detail-view').style.display='none';">← Groups</button>
+            <h3 id="warnings-group-title" style="text-align:center;margin:0 0 16px;"></h3>
+            <div id="warnings-member-list"></div>
+        </div>
+    </section>
+
 </div>
 
 <div class="footer">
     <div class="footer-line1">Attendance Management System | Ministry of Altar Servers</div>
     <div class="footer-line2">Diocesan Shrine and Parish of St. Mary Magdalene</div>
-    <div class="footer-line3">Pililla, Rizal</div>
-    <div class="footer-line4">Powered by Firebase &amp; Web3Forms</div>
-    <div class="footer-line4">Version: 3.1.0</div>    
+    <div style="font-size:11px;">Pililla, Rizal</div>
+    <div style="font-size:10px;opacity:0.5;">Powered by Firebase &amp; Web3Forms</div>
 </div>
 
 <script>
-    // THEME PERSISTENCE
+    // THEME
     const savedTheme = localStorage.getItem('theme') || 'light';
     document.documentElement.setAttribute('data-theme', savedTheme);
-
     window.toggleTheme = () => {
         const html = document.documentElement;
-        const newTheme = html.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        const newTheme = html.getAttribute('data-theme')==='light' ? 'dark' : 'light';
         html.setAttribute('data-theme', newTheme);
         localStorage.setItem('theme', newTheme);
     };
 
-    // GROUP DATA (defaults, overridden by Firestore)
+    // GROUP DATA
     window.groupMembers = {
-        "Group 1": ["Member 1","Member 2","Member 3"],
-        "Group 2": ["Member 4","Member 5","Member 6"],
-        "Group 3": ["Member 7","Member 8","Member 9"],
-        "Group 4": ["Member 10","Member 11","Member 12"],
-        "Group 5": ["Member 13","Member 14","Member 15"],
-        "Group 6": ["Member 16","Member 17","Member 18"],
-        "Other Occasions": []
+        "Group 1":["Member 1","Member 2","Member 3"],
+        "Group 2":["Member 4","Member 5","Member 6"],
+        "Group 3":["Member 7","Member 8","Member 9"],
+        "Group 4":["Member 10","Member 11","Member 12"],
+        "Group 5":["Member 13","Member 14","Member 15"],
+        "Group 6":["Member 16","Member 17","Member 18"],
+        "Other Occasions":[]
     };
 
-    const schedules = {
-        "Saturday": ["6:00 PM"],
-        "Sunday": ["6:00 AM","8:00 AM","10:00 AM","5:00 PM","6:30 PM"]
-    };
+    const schedules = { "Saturday":["6:00 PM"], "Sunday":["6:00 AM","8:00 AM","10:00 AM","5:00 PM","6:30 PM"] };
 
-    let selDay = "";
-    let currentGroup = "";
-    let subbedMembers = {};
-    let currentHistoryGroup = "";
-    let currentHistoryMember = "";
-    let lastSubmitType = ""; // "attendance" or "meeting"
+    let selDay = "", currentGroup = "", subbedMembers = {};
+    let currentHistoryGroup = "", currentHistoryMember = "";
+    let lastSubmitType = "";
 
-    // SET TODAY'S DATE ON LOAD
     window.addEventListener('DOMContentLoaded', () => {
         const today = new Date().toISOString().split('T')[0];
-        document.querySelectorAll('input[type="date"]').forEach(input => {
-            if (!input.value) input.value = today;
-        });
-        // Set default time for meeting
+        document.querySelectorAll('input[type="date"]').forEach(i => { if(!i.value) i.value = today; });
         const now = new Date();
-        const hh = String(now.getHours()).padStart(2,'0');
-        const mm = String(now.getMinutes()).padStart(2,'0');
+        const hh = String(now.getHours()).padStart(2,'0'), mm = String(now.getMinutes()).padStart(2,'0');
         const mtgTime = document.getElementById('mtg-time-input');
         if (mtgTime && !mtgTime.value) mtgTime.value = `${hh}:${mm}`;
     });
 
     // UPDATE UI BY ROLE
-    window.updateUIByRole = (role) => {
-        const attendBtn = document.getElementById('attend-btn');
-        const historyBtn = document.getElementById('history-btn');
-        const meetingBtn = document.getElementById('meeting-btn');
-        const adminGate = document.getElementById('admin-gate');
-
-        // All roles see serve history
-        if (historyBtn) historyBtn.style.display = 'block';
-
-        if (role === 'server') {
-            if (attendBtn) attendBtn.style.display = 'none';
-            if (meetingBtn) meetingBtn.style.display = 'none';
-            if (adminGate) adminGate.style.display = 'none';
-        } else if (role === 'group_leader') {
-            if (attendBtn) attendBtn.style.display = 'block';
-            if (meetingBtn) meetingBtn.style.display = 'block';
-            if (adminGate) adminGate.style.display = 'none';
-        } else if (role === 'admin') {
-            if (attendBtn) attendBtn.style.display = 'block';
-            if (meetingBtn) meetingBtn.style.display = 'block';
-            if (adminGate) adminGate.style.display = 'block';
-        }
+    window.updateUIByRole = async (role) => {
+        const show = (id, v) => { const el=document.getElementById(id); if(el) el.style.display=v?'block':'none'; };
+        show('history-btn', true);
+        show('concern-btn', true);
+        show('attend-btn', role==='admin'||role==='group_leader');
+        show('meeting-btn', role==='admin'||role==='group_leader');
+        show('admin-gate', role==='admin');
+        await window.loadGroupsFromFirestore();
     };
 
-    // --- SECTION NAVIGATION ---
+    // SECTION NAV
     window.showSection = (id) => {
         document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-        document.getElementById(id).classList.add('active');
-        if (id === 'member-directory') loadApprovedMembers();
-        if (id === 'serve-history') { showHistoryGroups(); loadHistoryGroups(); }
-        if (id === 'admin-panel') loadPending();
-        if (id === 'pw-requests-panel') loadPasswordRequests();
-        if (id === 'meeting-form') {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('active');
+        if (id==='member-directory') loadApprovedMembers();
+        if (id==='serve-history') { showHistoryGroups(); loadHistoryGroups(); }
+        if (id==='admin-panel') loadPending();
+        if (id==='pw-requests-panel') loadPasswordRequests();
+        if (id==='concerns-admin-panel') loadConcerns('open');
+        if (id==='warnings-panel') loadWarningsPanel();
+        if (id==='meeting-form') {
             buildMeetingList();
-            // Ensure officer name is set
             const officerInput = document.getElementById('officer-name-input');
-            if (officerInput && !officerInput.value && window.currentUserFullName) {
-                officerInput.value = window.currentUserFullName;
-            }
+            if (officerInput && !officerInput.value && window.currentUserFullName) officerInput.value = window.currentUserFullName;
         }
-        if (id === 'group-members-panel') buildGroupMembersEditor();
-        window.scrollTo(0, 0);
+        if (id==='group-members-panel') buildGroupMembersEditor();
+        window.scrollTo(0,0);
     };
 
-    // Return home without reloading
-    window.returnHome = () => {
-        lastSubmitType = "";
-        showSection('main-menu');
-    };
+    window.returnHome = () => { lastSubmitType = ""; showSection('main-menu'); };
 
-    // --- BUILD GROUP BUTTONS ---
+    // BUILD GROUP BUTTONS
     window.buildGroupButtons = () => {
         const grid = document.getElementById('group-buttons');
         grid.innerHTML = '';
         Object.keys(window.groupMembers).forEach(gn => {
             const btn = document.createElement('button');
-            btn.innerText = gn;
-            btn.className = 'btn-secondary';
-            btn.type = 'button';
+            btn.innerText = gn; btn.className = 'btn-secondary'; btn.type = 'button';
             btn.onclick = () => selectGroup(gn);
             grid.appendChild(btn);
         });
@@ -1264,50 +1041,29 @@
         currentGroup = gn;
         document.getElementById('form-title').innerText = gn;
         const cont = document.getElementById('checklist-container');
-        cont.innerHTML = '';
-        subbedMembers = {};
-
-        if (gn === 'Other Occasions') {
-            const otherBtn = document.querySelector('.day-btn:nth-child(3)');
-            if (otherBtn) setDay('Other', otherBtn);
-        }
-
+        cont.innerHTML = ''; subbedMembers = {};
+        if (gn==='Other Occasions') { const ob = document.querySelector('.day-btn:nth-child(3)'); if(ob) setDay('Other',ob); }
         window.groupMembers[gn].forEach(m => {
+            const key = m.replace(/ /g,'_');
             const row = document.createElement('div');
-            row.className = 'member-row';
-            row.id = `member-row-${m.replace(/ /g,'_')}`;
-
-            if (gn === 'Other Occasions') {
-                row.innerHTML = `
-                    <div class="member-main">
-                        <span>${m}</span>
-                        <div style="display:flex;gap:6px;align-items:center;">
-                            <button type="button" class="btn-subbed" onclick="openSubbedModal('${m}')" style="display:none;" id="subbed-btn-${m.replace(/ /g,'_')}">Subbed</button>
-                            <input type="checkbox" checked onchange="toggleReasonAndSubbed(this,'${m}')" class="member-cb" data-name="${m}">
-                        </div>
-                    </div>
-                    <div class="subbed-info-tag" id="subbed-info-${m.replace(/ /g,'_')}"></div>`;
+            row.className = 'member-row'; row.id = `member-row-${key}`;
+            if (gn==='Other Occasions') {
+                row.innerHTML = `<div class="member-main"><span>${m}</span><div style="display:flex;gap:6px;align-items:center;">
+                    <button type="button" class="btn-subbed" onclick="openSubbedModal('${m}')" style="display:none;" id="subbed-btn-${key}">Subbed</button>
+                    <input type="checkbox" checked onchange="toggleReasonAndSubbed(this,'${m}')" class="member-cb" data-name="${m}">
+                </div></div><div class="subbed-info-tag" id="subbed-info-${key}"></div>`;
             } else {
-                row.innerHTML = `
-                    <div class="member-main">
-                        <span>${m}</span>
-                        <div style="display:flex;gap:6px;align-items:center;">
-                            <button type="button" class="btn-subbed" onclick="openSubbedModal('${m}')" id="subbed-btn-${m.replace(/ /g,'_')}">Subbed</button>
-                            <input type="checkbox" checked onchange="toggleReasonAndSubbed(this,'${m}')" class="member-cb" data-name="${m}">
-                        </div>
-                    </div>
-                    <div class="reason-box" id="reason-${m.replace(/ /g,'_')}">
-                        <select onchange="toggleOtherReason(this.value,'${m}')" class="reason-select">
-                            <option>Unexcused</option>
-                            <option>Excused</option>
-                            <option>Sick</option>
-                            <option>School/Work</option>
-                            <option>Suspended</option>
-                            <option value="Other">Other...</option>
-                        </select>
-                        <input type="text" id="other-reason-${m.replace(/ /g,'_')}" placeholder="Please specify reason" style="display:none; margin-top:8px;">
-                    </div>
-                    <div class="subbed-info-tag" id="subbed-info-${m.replace(/ /g,'_')}"></div>`;
+                row.innerHTML = `<div class="member-main"><span>${m}</span><div style="display:flex;gap:6px;align-items:center;">
+                    <button type="button" class="btn-subbed" onclick="openSubbedModal('${m}')" id="subbed-btn-${key}">Subbed</button>
+                    <input type="checkbox" checked onchange="toggleReasonAndSubbed(this,'${m}')" class="member-cb" data-name="${m}">
+                </div></div>
+                <div class="reason-box" id="reason-${key}">
+                    <select onchange="toggleOtherReason(this.value,'${m}')" class="reason-select">
+                        <option>Unexcused</option><option>Excused</option><option>Sick</option>
+                        <option>School/Work</option><option>Suspended</option><option value="Other">Other...</option>
+                    </select>
+                    <input type="text" id="other-reason-${key}" placeholder="Please specify reason" style="display:none;margin-top:8px;">
+                </div><div class="subbed-info-tag" id="subbed-info-${key}"></div>`;
             }
             cont.appendChild(row);
         });
@@ -1315,754 +1071,522 @@
         showSection('serve-form');
     };
 
-    // --- HISTORY VIEW FUNCTIONS ---
+    // HISTORY
     window.showHistoryGroups = () => {
         document.getElementById('history-group-list').style.display = 'grid';
         document.getElementById('history-member-section').style.display = 'none';
         document.getElementById('history-detail-section').style.display = 'none';
     };
-
     window.showHistoryMembers = () => {
         document.getElementById('history-group-list').style.display = 'none';
         document.getElementById('history-member-section').style.display = 'block';
         document.getElementById('history-detail-section').style.display = 'none';
     };
-
     window.showHistoryDetail = () => {
         document.getElementById('history-group-list').style.display = 'none';
         document.getElementById('history-member-section').style.display = 'none';
         document.getElementById('history-detail-section').style.display = 'block';
     };
-
     window.loadHistoryGroups = () => {
         const container = document.getElementById('history-group-list');
         container.innerHTML = '';
-        const meetingGroups = Object.keys(window.groupMembers).filter(gn => gn !== 'Other Occasions');
-        meetingGroups.forEach(gn => {
+        Object.keys(window.groupMembers).filter(gn=>gn!=='Other Occasions').forEach(gn => {
             const btn = document.createElement('button');
-            btn.className = 'btn-secondary';
-            btn.type = 'button';
-            btn.textContent = gn;
-            btn.onclick = () => {
-                currentHistoryGroup = gn;
-                loadHistoryMembers(gn);
-                showHistoryMembers();
-            };
+            btn.className = 'btn-secondary'; btn.type = 'button'; btn.textContent = gn;
+            btn.onclick = () => { currentHistoryGroup=gn; loadHistoryMembers(gn); showHistoryMembers(); };
             container.appendChild(btn);
         });
     };
-
     window.loadHistoryMembers = (groupName) => {
         const container = document.getElementById('history-members-list');
         container.innerHTML = '';
         window.groupMembers[groupName].forEach(member => {
             const btn = document.createElement('button');
-            btn.className = 'btn-secondary';
-            btn.type = 'button';
-            btn.style.marginBottom = '8px';
-            btn.textContent = member;
-            btn.onclick = () => {
-                currentHistoryMember = member;
-                loadMemberHistory(member);
-                showHistoryDetail();
-            };
+            btn.className = 'btn-secondary'; btn.type = 'button'; btn.style.marginBottom = '8px'; btn.textContent = member;
+            btn.onclick = () => { currentHistoryMember=member; loadMemberHistory(member); showHistoryDetail(); };
             container.appendChild(btn);
         });
     };
-
     window.loadMemberHistory = async (memberName) => {
         document.getElementById('history-member-title').innerText = memberName;
         const container = document.getElementById('history-record-list');
-        container.innerHTML = '<p style="font-size:12px; opacity:0.6;">Loading history...</p>';
-
+        container.innerHTML = '<p style="font-size:12px;opacity:0.6;">Loading history...</p>';
         try {
             const snap = await window._getDocs(
-                window._query(
-                    window._collection(window._db, "attendance_history"),
-                    window._where("member_name", "==", memberName)
-                )
+                window._query(window._collection(window._db,"attendance_history"), window._where("member_name","==",memberName))
             );
-
+            const warnSnap = await window._getDocs(
+                window._query(window._collection(window._db,"member_warnings"), window._where("member_name","==",memberName))
+            );
             container.innerHTML = '';
-            if (snap.empty) {
-                container.innerHTML = '<p style="font-size:12px; opacity:0.6;">No attendance records yet.</p>';
+            if (snap.empty && warnSnap.empty) {
+                container.innerHTML = '<p style="font-size:12px;opacity:0.6;">No attendance records yet.</p>';
                 return;
             }
-
-            const records = snap.docs.map(d => d.data()).sort((a, b) => {
-                const da = a.timestamp ? a.timestamp.toDate() : new Date(a.date);
-                const db2 = b.timestamp ? b.timestamp.toDate() : new Date(b.date);
+            const records = snap.docs.map(d=>({...d.data(), _type:'attendance'}));
+            const warnings = warnSnap.docs.map(d=>({...d.data(), _type:'warning'}));
+            const all = [...records, ...warnings].sort((a,b) => {
+                const da = a.timestamp ? a.timestamp.toDate() : new Date(0);
+                const db2 = b.timestamp ? b.timestamp.toDate() : new Date(0);
                 return db2 - da;
             });
-
-            records.forEach(record => {
+            all.forEach(record => {
+                if (record._type === 'warning') {
+                    const card = document.createElement('div');
+                    card.className = 'history-item warning-notice';
+                    const dateStr = record.sent_at ? record.sent_at.toDate().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Unknown';
+                    card.innerHTML = `<span class="history-date">⚠️ ${dateStr}</span>
+                        <span class="history-status notice">NOTICE</span>
+                        <div style="font-size:12px;margin-top:6px;line-height:1.6;opacity:0.85;white-space:pre-line;">${record.message}</div>`;
+                    container.appendChild(card);
+                    return;
+                }
                 const item = document.createElement('div');
-                item.className = `history-item ${record.status === 'present' ? 'present' : 'absent'}`;
-                const dateObj = record.timestamp ? record.timestamp.toDate() : new Date(record.date);
-                const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                const reasonText = record.reason ? ` — ${record.reason}` : '';
-                const schedText = record.schedule ? `<br><small style="opacity:0.6">${record.schedule}</small>` : '';
-                item.innerHTML = `
-                    <span class="history-date">${dateStr}</span>
-                    <span class="history-status ${record.status}">${record.status.toUpperCase()}</span>${reasonText}${schedText}`;
+                const dateObj = record.timestamp ? record.timestamp.toDate() : new Date(record.date||0);
+                const dateStr = dateObj.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+                
+                // ENHANCED: Show schedule with day and time for serve records
+                let schedStr = '';
+                if (record.schedule) {
+                    const parts = record.schedule.split(' | ');
+                    if (parts.length === 3) {
+                        schedStr = `📅 ${parts[0]} • ${parts[2]}`;
+                    } else if (record.group === 'Other Occasions') {
+                        schedStr = `📅 ${parts[0]} • ${parts[2]}`;
+                    }
+                }
+                
+                // ENHANCED: Add meeting info if from meeting log
+                let meetingInfo = '';
+                if (record.meeting_type) {
+                    const mtgTime = record.meeting_time ? ` • ${record.meeting_time}` : '';
+                    meetingInfo = `📋 ${record.meeting_type}${mtgTime}`;
+                }
+                
+                const subText = record.subbed ? ` — Subbed w/ <strong>${record.subbed}</strong>` : '';
+                if (record.status === 'present') {
+                    item.className = 'history-item present';
+                    item.innerHTML = `<span class="history-date">${dateStr}</span>
+                        <span class="history-status present">PRESENT</span>${subText}
+                        ${schedStr ? `<br><small style="opacity:0.6;font-size:11px;">${schedStr}</small>` : ''}
+                        ${meetingInfo ? `<br><small style="opacity:0.6;font-size:11px;">${meetingInfo}</small>` : ''}`;
+                } else {
+                    const reason = (record.reason||'').toLowerCase();
+                    const excusedList = ['excused','sick','school/work'];
+                    let cssClass = 'absent-unexcused', statusClass = 'absent', statusLabel = 'ABSENT';
+                    if (reason === 'suspended') { cssClass='absent-suspended'; statusClass='suspended'; statusLabel='SUSPENDED'; }
+                    else if (excusedList.includes(reason)) { cssClass='absent-excused'; statusClass='excused'; statusLabel='EXCUSED'; }
+                    item.className = `history-item ${cssClass}`;
+                    const reasonText = record.reason ? ` — ${record.reason}` : '';
+                    item.innerHTML = `<span class="history-date">${dateStr}</span>
+                        <span class="history-status ${statusClass}">${statusLabel}</span>${reasonText}${subText}
+                        ${schedStr ? `<br><small style="opacity:0.6;font-size:11px;">${schedStr}</small>` : ''}
+                        ${meetingInfo ? `<br><small style="opacity:0.6;font-size:11px;">${meetingInfo}</small>` : ''}`;
+                }
                 container.appendChild(item);
             });
         } catch(err) {
-            container.innerHTML = '<p style="color:var(--absent);">Error loading history: ' + err.message + '</p>';
+            container.innerHTML = '<p style="color:var(--absent);">Error loading: '+err.message+'</p>';
         }
     };
 
-    // --- GROUP MEMBERS EDITOR ---
+    // GROUP MEMBER EDITOR
     window.buildGroupMembersEditor = async () => {
         const container = document.getElementById('group-members-container');
         container.innerHTML = '<p style="font-size:12px;opacity:0.6;">Loading groups...</p>';
-
-        const meetingGroups = Object.keys(window.groupMembers).filter(gn => gn !== 'Other Occasions');
-
-        // Reload from Firestore first
-        for (const groupName of meetingGroups) {
+        const meetingGroups = Object.keys(window.groupMembers).filter(gn=>gn!=='Other Occasions');
+        for (const gn of meetingGroups) {
             try {
-                const snap = await window._getDoc(window._doc(window._db, "groups", groupName));
-                if (snap.exists()) {
-                    window.groupMembers[groupName] = snap.data().members || window.groupMembers[groupName];
-                }
-            } catch(err) {}
+                const snap = await window._getDoc(window._doc(window._db,"groups",gn));
+                if (snap.exists()) window.groupMembers[gn] = snap.data().members || window.groupMembers[gn];
+            } catch(err){}
         }
-
         container.innerHTML = '';
-
         for (const groupName of meetingGroups) {
-            const groupDiv = document.createElement('div');
-            groupDiv.className = 'group-member-edit';
-
-            const header = document.createElement('div');
-            header.className = 'group-member-edit-header';
-            header.textContent = groupName;
+            const groupDiv = document.createElement('div'); groupDiv.className = 'group-member-edit';
+            const header = document.createElement('div'); header.className = 'group-member-edit-header'; header.textContent = groupName;
             groupDiv.appendChild(header);
-
             const membersContainer = document.createElement('div');
-            membersContainer.id = `group-edit-${groupName.replace(/ /g,'_')}`;
-
-            const members = window.groupMembers[groupName];
-            members.forEach((member, idx) => {
-                const row = createMemberEditRow(groupName, member, idx);
-                membersContainer.appendChild(row);
+            window.groupMembers[groupName].forEach((member, idx) => {
+                membersContainer.appendChild(createMemberEditRow(groupName, member, idx));
             });
-
             groupDiv.appendChild(membersContainer);
-
-            const addBtn = document.createElement('button');
-            addBtn.className = 'btn-secondary';
-            addBtn.type = 'button';
-            addBtn.style.marginTop = '10px';
-            addBtn.textContent = '+ Add Member';
+            const addBtn = document.createElement('button'); addBtn.className = 'btn-secondary'; addBtn.type = 'button';
+            addBtn.style.marginTop = '10px'; addBtn.textContent = '+ Add Member';
             addBtn.onclick = () => addGroupMember(groupName);
             groupDiv.appendChild(addBtn);
-
             container.appendChild(groupDiv);
         }
     };
 
     window.createMemberEditRow = (groupName, member, idx) => {
-        const row = document.createElement('div');
-        row.className = 'member-edit-row';
-        row.dataset.groupName = groupName;
-        row.dataset.idx = idx;
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = member;
-        input.style.marginBottom = '0';
-        // Save on blur
+        const row = document.createElement('div'); row.className = 'member-edit-row';
+        const input = document.createElement('input'); input.type='text'; input.value=member; input.style.marginBottom='0';
         input.onblur = async () => {
             const newName = input.value.trim();
-            if (!newName || newName === member) return;
+            if (!newName || newName===member) return;
             window.groupMembers[groupName][idx] = newName;
             await saveGroupToFirestore(groupName);
             showCopyFeedback('✓ Member updated');
-            // Refresh dependent UI
             buildMeetingList();
         };
-
-        const delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.className = 'btn-icon';
-        delBtn.title = 'Remove';
-        delBtn.textContent = '🗑';
+        const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='btn-icon'; delBtn.title='Remove'; delBtn.textContent='🗑';
         delBtn.onclick = () => removeGroupMember(groupName, idx);
-
-        row.appendChild(input);
-        row.appendChild(delBtn);
+        row.appendChild(input); row.appendChild(delBtn);
         return row;
     };
 
     window.saveGroupToFirestore = async (groupName) => {
         try {
-            await window._setDoc(window._doc(window._db, "groups", groupName), {
-                members: window.groupMembers[groupName]
-            });
-            // Update Other Occasions
+            await window._setDoc(window._doc(window._db,"groups",groupName),{members: window.groupMembers[groupName]});
             let all = [];
-            Object.keys(window.groupMembers).filter(gn => gn !== 'Other Occasions').forEach(gn => {
-                all = all.concat(window.groupMembers[gn]);
-            });
+            Object.keys(window.groupMembers).filter(gn=>gn!=='Other Occasions').forEach(gn=>{all=all.concat(window.groupMembers[gn]);});
             window.groupMembers['Other Occasions'] = all;
-        } catch(err) {
-            alert('Error saving to Firebase: ' + err.message);
-        }
+        } catch(err) { alert('Error saving to Firebase: '+err.message); }
     };
 
     window.addGroupMember = async (groupName) => {
         const newName = prompt(`Add new member to ${groupName}:`);
-        if (!newName || !newName.trim()) return;
+        if (!newName||!newName.trim()) return;
         window.groupMembers[groupName].push(newName.trim());
         await saveGroupToFirestore(groupName);
-        buildGroupMembersEditor();
-        buildMeetingList();
-        showCopyFeedback(`✓ ${newName.trim()} added to ${groupName}`);
+        buildGroupMembersEditor(); buildMeetingList();
+        showCopyFeedback(`✓ ${newName.trim()} added`);
     };
 
     window.removeGroupMember = async (groupName, idx) => {
         const memberName = window.groupMembers[groupName][idx];
         if (!confirm(`Remove ${memberName} from ${groupName}?`)) return;
-        window.groupMembers[groupName].splice(idx, 1);
+        window.groupMembers[groupName].splice(idx,1);
         await saveGroupToFirestore(groupName);
-        buildGroupMembersEditor();
-        buildMeetingList();
-        showCopyFeedback(`✓ ${memberName} removed from ${groupName}`);
+        buildGroupMembersEditor(); buildMeetingList();
+        showCopyFeedback(`✓ ${memberName} removed`);
     };
 
-    // --- ATTENDANCE FORM ---
+    // ATTENDANCE FORM HELPERS
     window.setAllPresent = () => {
         document.querySelectorAll('.member-cb').forEach(c => {
             c.checked = true;
-            const key = c.dataset.name.replace(/ /g,'_');
-            const rb = document.getElementById(`reason-${key}`);
-            const sb = document.getElementById(`subbed-btn-${key}`);
-            if (rb) rb.style.display = "none";
-            if (sb) sb.style.display = "inline-block";
-        });
-        updateAttendanceCounter();
+            const key=c.dataset.name.replace(/ /g,'_');
+            const rb=document.getElementById(`reason-${key}`), sb=document.getElementById(`subbed-btn-${key}`);
+            if(rb) rb.style.display='none'; if(sb) sb.style.display='inline-block';
+        }); updateAttendanceCounter();
     };
-
     window.setAllAbsent = () => {
         document.querySelectorAll('.member-cb').forEach(c => {
             c.checked = false;
-            const key = c.dataset.name.replace(/ /g,'_');
-            const rb = document.getElementById(`reason-${key}`);
-            const sb = document.getElementById(`subbed-btn-${key}`);
-            if (rb) rb.style.display = "block";
-            if (sb) sb.style.display = "none";
+            const key=c.dataset.name.replace(/ /g,'_');
+            const rb=document.getElementById(`reason-${key}`), sb=document.getElementById(`subbed-btn-${key}`);
+            if(rb) rb.style.display='block'; if(sb) sb.style.display='none';
             delete subbedMembers[c.dataset.name];
-            const si = document.getElementById(`subbed-info-${key}`);
-            if (si) si.style.display = "none";
-        });
-        updateAttendanceCounter();
+            const si=document.getElementById(`subbed-info-${key}`); if(si) si.style.display='none';
+        }); updateAttendanceCounter();
     };
-
     window.setDay = (day, btn) => {
         selDay = day;
-        document.querySelectorAll('.day-btn').forEach(b => b.style.borderColor = "var(--border)");
-        btn.style.borderColor = "var(--gold)";
-        const selector = document.getElementById('mass-time-selector');
-        const special = document.getElementById('special-event-fields');
-        if (day === 'Other') {
-            selector.style.display = "none";
-            special.style.display = "block";
-        } else {
-            selector.style.display = "block";
-            special.style.display = "none";
-            const targetDay = (day === 'Saturday') ? 6 : 0;
-            const now = new Date();
-            const diff = (targetDay - now.getDay() + 7) % 7;
-            const targetDate = new Date(now);
-            targetDate.setDate(now.getDate() + (diff === 0 ? 0 : diff));
-            const dateStr = targetDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-            document.getElementById('date-display').innerText = day + ": " + dateStr;
-            document.getElementById('mass-schedule-dropdown').innerHTML =
-                schedules[day].map(t => `<option>${t}</option>`).join('');
-            window._selectedServiceDate = targetDate.toLocaleDateString();
-            window._selectedServiceDateFull = targetDate;
+        document.querySelectorAll('.day-btn').forEach(b=>b.style.borderColor='var(--border)');
+        btn.style.borderColor = 'var(--gold)';
+        const selector=document.getElementById('mass-time-selector'), special=document.getElementById('special-event-fields');
+        if (day==='Other') { selector.style.display='none'; special.style.display='block'; }
+        else {
+            selector.style.display='block'; special.style.display='none';
+            const targetDay=(day==='Saturday')?6:0, now=new Date();
+            const diff=(targetDay-now.getDay()+7)%7;
+            const targetDate=new Date(now); targetDate.setDate(now.getDate()+(diff===0?0:diff));
+            document.getElementById('date-display').innerText=day+': '+targetDate.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+            document.getElementById('mass-schedule-dropdown').innerHTML=schedules[day].map(t=>`<option>${t}</option>`).join('');
+            window._selectedServiceDate=targetDate.toLocaleDateString();
+            window._selectedServiceDateFull=targetDate;
         }
         updateFinalSched();
     };
-
     window.updateFinalSched = () => {
-        const h = document.getElementById('hidden-final-sched');
-        if (selDay === 'Other') {
-            const name = document.getElementById('special-name').value;
-            const d = document.getElementById('special-date').value;
-            const t = document.getElementById('special-time').value;
-            h.value = `${name || 'Other Service'} | ${d} ${t}`;
+        const h=document.getElementById('hidden-final-sched');
+        if (selDay==='Other') {
+            const name=document.getElementById('special-name').value, d=document.getElementById('special-date').value, t=document.getElementById('special-time').value;
+            h.value=`${name||'Other Service'} | ${d} ${t}`;
         } else {
-            const time = document.getElementById('mass-schedule-dropdown') ? document.getElementById('mass-schedule-dropdown').value : '';
-            h.value = `${selDay} | ${window._selectedServiceDate || new Date().toLocaleDateString()} | ${time}`;
+            const time=document.getElementById('mass-schedule-dropdown')?document.getElementById('mass-schedule-dropdown').value:'';
+            h.value=`${selDay} | ${window._selectedServiceDate||new Date().toLocaleDateString()} | ${time}`;
         }
     };
-
     window.toggleReasonAndSubbed = (cb, member) => {
-        const key = member.replace(/ /g,'_');
-        const reasonBox = document.getElementById(`reason-${key}`);
-        const subbedBtn = document.getElementById(`subbed-btn-${key}`);
-        if (cb.checked) {
-            if (reasonBox) reasonBox.style.display = "none";
-            if (subbedBtn) subbedBtn.style.display = "inline-block";
-        } else {
-            if (reasonBox) reasonBox.style.display = "block";
-            if (subbedBtn) subbedBtn.style.display = "none";
+        const key=member.replace(/ /g,'_');
+        const rb=document.getElementById(`reason-${key}`), sb=document.getElementById(`subbed-btn-${key}`);
+        if (cb.checked) { if(rb) rb.style.display='none'; if(sb) sb.style.display='inline-block'; }
+        else {
+            if(rb) rb.style.display='block'; if(sb) sb.style.display='none';
             delete subbedMembers[member];
-            const si = document.getElementById(`subbed-info-${key}`);
-            if (si) si.style.display = "none";
+            const si=document.getElementById(`subbed-info-${key}`); if(si) si.style.display='none';
         }
         updateAttendanceCounter();
     };
-
     window.openSubbedModal = (memberName) => {
-        const existingSubbed = subbedMembers[memberName];
-        const modal = document.createElement('div');
-        modal.className = 'subbed-modal';
-        let html = `<div class="subbed-modal-content">
-            <h4>Subbed With</h4>
-            <p style="font-size: 12px; color: var(--text); margin: 0 0 12px 0;">${memberName} subbed with:</p>
-            <input type="text" id="subbed-input" placeholder="Enter substitute server name" value="${existingSubbed || ''}">
+        const existing=subbedMembers[memberName], modal=document.createElement('div');
+        modal.className='subbed-modal';
+        let html=`<div class="subbed-modal-content"><h4>Subbed With</h4>
+            <p style="font-size:12px;color:var(--text);margin:0 0 12px;">${memberName} subbed with:</p>
+            <input type="text" id="subbed-input" placeholder="Enter substitute server name" value="${existing||''}">
             <div class="modal-buttons">
                 <button class="btn-confirm" onclick="confirmSubbed('${memberName}')">Confirm</button>
                 <button class="btn-cancel" onclick="closeSubbedModal()">Cancel</button>`;
-        if (existingSubbed) {
-            html += `<button style="background: var(--absent); color: white; flex:1; min-width:70px; min-height:40px; border-radius:8px; border:none; font-weight:600; cursor:pointer; font-size:13px;" onclick="removeSubbed('${memberName}')">Remove</button>`;
-        }
-        html += `</div></div>`;
-        modal.innerHTML = html;
+        if (existing) html+=`<button style="background:var(--absent);color:white;flex:1;min-width:70px;min-height:40px;border-radius:8px;border:none;font-weight:600;cursor:pointer;font-size:13px;" onclick="removeSubbed('${memberName}')">Remove</button>`;
+        html+=`</div></div>`; modal.innerHTML=html;
         document.body.appendChild(modal);
-        setTimeout(() => document.getElementById('subbed-input').focus(), 100);
+        setTimeout(()=>document.getElementById('subbed-input').focus(),100);
     };
-
-    window.removeSubbed = (memberName) => {
-        delete subbedMembers[memberName];
-        const key = memberName.replace(/ /g,'_');
-        const si = document.getElementById(`subbed-info-${key}`);
-        if (si) si.style.display = "none";
-        closeSubbedModal();
-        showCopyFeedback('✓ Subbed entry removed');
-    };
-
-    window.confirmSubbed = (memberName) => {
-        const input = document.getElementById('subbed-input');
-        const subbedWith = input.value.trim();
-        if (!subbedWith) { alert('Please enter the substitute server name'); return; }
-        subbedMembers[memberName] = subbedWith;
-        const key = memberName.replace(/ /g,'_');
-        const si = document.getElementById(`subbed-info-${key}`);
-        if (si) { si.textContent = `✓ Subbed with ${subbedWith}`; si.style.display = "block"; }
+    window.removeSubbed = (mn) => { delete subbedMembers[mn]; const si=document.getElementById(`subbed-info-${mn.replace(/ /g,'_')}`); if(si) si.style.display='none'; closeSubbedModal(); showCopyFeedback('✓ Subbed entry removed'); };
+    window.confirmSubbed = (mn) => {
+        const input=document.getElementById('subbed-input'), sw=input.value.trim();
+        if (!sw) { alert('Please enter the substitute server name'); return; }
+        subbedMembers[mn]=sw;
+        const key=mn.replace(/ /g,'_'), si=document.getElementById(`subbed-info-${key}`);
+        if (si) { si.textContent=`✓ Subbed with ${sw}`; si.style.display='block'; }
         closeSubbedModal();
     };
-
-    window.closeSubbedModal = () => {
-        const modal = document.querySelector('.subbed-modal');
-        if (modal) modal.remove();
-    };
-
-    window.toggleOtherReason = (val, member) => {
-        const key = member.replace(/ /g,'_');
-        const el = document.getElementById(`other-reason-${key}`);
-        if (el) el.style.display = (val === 'Other') ? "block" : "none";
-    };
-
-    window.toggleMtgOther = (val) => {
-        document.getElementById('mtg-other-input').style.display = (val === 'Other') ? "block" : "none";
-    };
-
+    window.closeSubbedModal = () => { const m=document.querySelector('.subbed-modal'); if(m) m.remove(); };
+    window.toggleOtherReason = (val, member) => { const el=document.getElementById(`other-reason-${member.replace(/ /g,'_')}`); if(el) el.style.display=(val==='Other')?'block':'none'; };
+    window.toggleMtgOther = (val) => { document.getElementById('mtg-other-input').style.display=(val==='Other')?'block':'none'; };
     window.updateAttendanceCounter = () => {
-        let present = 0, absent = 0;
-        document.querySelectorAll('.member-cb').forEach(c => { if (c.checked) present++; else absent++; });
-        document.getElementById('present-count').textContent = present;
-        document.getElementById('absent-count').textContent = absent;
-        const absentItem = document.getElementById('absent-counter-item');
-        if (absentItem) absentItem.style.display = currentGroup === 'Other Occasions' ? 'none' : 'flex';
+        let p=0,a=0; document.querySelectorAll('.member-cb').forEach(c=>{if(c.checked)p++;else a++;});
+        document.getElementById('present-count').textContent=p; document.getElementById('absent-count').textContent=a;
+        const ai=document.getElementById('absent-counter-item'); if(ai) ai.style.display=currentGroup==='Other Occasions'?'none':'flex';
     };
 
-    // --- MEETING FULL MEMBER LIST ---
+    // MEETING LIST
     window.buildMeetingList = () => {
-        const container = document.getElementById('meeting-full-list');
-        container.innerHTML = '';
-        const meetingGroups = Object.keys(window.groupMembers).filter(gn => gn !== 'Other Occasions');
-        meetingGroups.forEach(gn => {
-            const header = document.createElement('div');
-            header.className = 'meeting-group-header';
-            header.innerHTML = `<span class="line"></span><span class="label">${gn}</span><span class="line"></span>`;
+        const container=document.getElementById('meeting-full-list'); container.innerHTML='';
+        Object.keys(window.groupMembers).filter(gn=>gn!=='Other Occasions').forEach(gn => {
+            const header=document.createElement('div'); header.className='meeting-group-header';
+            header.innerHTML=`<span class="line"></span><span class="label">${gn}</span><span class="line"></span>`;
             container.appendChild(header);
-
             window.groupMembers[gn].forEach(member => {
-                const wrap = document.createElement('div');
-                wrap.id = `mtg-wrap-${member.replace(/ /g,'_')}`;
-
-                const row = document.createElement('label');
-                row.className = 'member-check-item';
-                row.htmlFor = `mtg-cb-${member.replace(/ /g,'_')}`;
-                row.innerHTML = `
-                    <input type="checkbox" id="mtg-cb-${member.replace(/ /g,'_')}" data-member="${member}" checked
-                        onchange="onMtgCheck(this,'${member}')">
+                const key=member.replace(/ /g,'_'), wrap=document.createElement('div');
+                wrap.id=`mtg-wrap-${key}`;
+                const row=document.createElement('label'); row.className='member-check-item'; row.htmlFor=`mtg-cb-${key}`;
+                row.innerHTML=`<input type="checkbox" id="mtg-cb-${key}" data-member="${member}" checked onchange="onMtgCheck(this,'${member}')">
                     <span class="member-name">${member}</span>
-                    <span class="check-status present" id="mtg-status-${member.replace(/ /g,'_')}">Present</span>`;
+                    <span class="check-status present" id="mtg-status-${key}">Present</span>`;
                 wrap.appendChild(row);
-
-                const reasonDiv = document.createElement('div');
-                reasonDiv.className = 'mtg-reason-box';
-                reasonDiv.id = `mtg-reason-${member.replace(/ /g,'_')}`;
-                reasonDiv.innerHTML = `
-                    <select onchange="onMtgReasonChange(this,'${member}')" class="mtg-reason-sel" style="margin-bottom:6px;">
-                        <option>Unexcused</option>
-                        <option>Excused</option>
-                        <option>Sick</option>
-                        <option>School/Work</option>
-                        <option>Suspended</option>
-                        <option value="Other">Other...</option>
-                    </select>
-                    <input type="text" class="mtg-other-reason" placeholder="Please specify reason" style="display:none; margin-bottom:0;">`;
-                wrap.appendChild(reasonDiv);
-                container.appendChild(wrap);
+                const rd=document.createElement('div'); rd.className='mtg-reason-box'; rd.id=`mtg-reason-${key}`;
+                rd.innerHTML=`<select onchange="onMtgReasonChange(this,'${member}')" class="mtg-reason-sel" style="margin-bottom:6px;">
+                    <option>Unexcused</option><option>Excused</option><option>Sick</option>
+                    <option>School/Work</option><option>Suspended</option><option value="Other">Other...</option>
+                </select><input type="text" class="mtg-other-reason" placeholder="Please specify reason" style="display:none;margin-bottom:0;">`;
+                wrap.appendChild(rd); container.appendChild(wrap);
             });
         });
         updateMtgCounter();
     };
-
     window.onMtgCheck = (cb, member) => {
-        const key = member.replace(/ /g,'_');
-        const status = document.getElementById(`mtg-status-${key}`);
-        const reasonDiv = document.getElementById(`mtg-reason-${key}`);
-        if (cb.checked) {
-            if (status) { status.textContent = 'Present'; status.className = 'check-status present'; }
-            if (reasonDiv) reasonDiv.style.display = 'none';
-        } else {
-            if (status) { status.textContent = 'Absent'; status.className = 'check-status absent'; }
-            if (reasonDiv) reasonDiv.style.display = 'block';
-        }
+        const key=member.replace(/ /g,'_'), st=document.getElementById(`mtg-status-${key}`), rd=document.getElementById(`mtg-reason-${key}`);
+        if (cb.checked) { if(st){st.textContent='Present';st.className='check-status present';} if(rd) rd.style.display='none'; }
+        else { if(st){st.textContent='Absent';st.className='check-status absent';} if(rd) rd.style.display='block'; }
         updateMtgCounter();
     };
-
     window.onMtgReasonChange = (sel, member) => {
-        const wrap = sel.closest('.mtg-reason-box');
-        const otherInput = wrap ? wrap.querySelector('.mtg-other-reason') : null;
-        if (otherInput) otherInput.style.display = sel.value === 'Other' ? 'block' : 'none';
+        const wrap=sel.closest('.mtg-reason-box'), oi=wrap?wrap.querySelector('.mtg-other-reason'):null;
+        if(oi) oi.style.display=sel.value==='Other'?'block':'none';
     };
-
     window.updateMtgCounter = () => {
-        let present = 0, absent = 0;
-        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(c => {
-            if (c.checked) present++; else absent++;
-        });
-        document.getElementById('mtg-present-count').textContent = present;
-        document.getElementById('mtg-absent-count').textContent = absent;
+        let p=0,a=0; document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(c=>{if(c.checked)p++;else a++;});
+        document.getElementById('mtg-present-count').textContent=p; document.getElementById('mtg-absent-count').textContent=a;
     };
-
-    window.setMtgAllPresent = () => {
-        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb => {
-            cb.checked = true;
-            onMtgCheck(cb, cb.dataset.member);
-        });
-    };
-
-    window.setMtgAllAbsent = () => {
-        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb => {
-            cb.checked = false;
-            onMtgCheck(cb, cb.dataset.member);
-        });
-    };
-
+    window.setMtgAllPresent = () => { document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb=>{cb.checked=true;onMtgCheck(cb,cb.dataset.member);}); };
+    window.setMtgAllAbsent = () => { document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb=>{cb.checked=false;onMtgCheck(cb,cb.dataset.member);}); };
     window.getMeetingAttendees = () => {
-        const lines = [];
-        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb => {
-            const member = cb.dataset.member;
-            const key = member.replace(/ /g,'_');
-            if (cb.checked) {
-                lines.push(`${member}: [PRESENT]`);
-            } else {
-                const reasonDiv = document.getElementById(`mtg-reason-${key}`);
-                const sel = reasonDiv ? reasonDiv.querySelector('.mtg-reason-sel') : null;
-                const otherInput = reasonDiv ? reasonDiv.querySelector('.mtg-other-reason') : null;
-                let reason = sel ? sel.value : 'Absent';
-                if (reason === 'Other' && otherInput && otherInput.value) reason = otherInput.value;
+        const lines=[];
+        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb=>{
+            const member=cb.dataset.member, key=member.replace(/ /g,'_');
+            if (cb.checked) { lines.push(`${member}: [PRESENT]`); }
+            else {
+                const rd=document.getElementById(`mtg-reason-${key}`), sel=rd?rd.querySelector('.mtg-reason-sel'):null, oi=rd?rd.querySelector('.mtg-other-reason'):null;
+                let reason=sel?sel.value:'Absent'; if(reason==='Other'&&oi&&oi.value) reason=oi.value;
                 lines.push(`${member}: [ABSENT] - ${reason}`);
             }
         });
         return lines.join(' | ');
     };
 
-    // --- COPY REPORT ---
-    window.copyReportToClipboard = () => {
-        if (lastSubmitType === 'meeting') {
-            copyMeetingReport();
-        } else {
-            copyAttendanceReport();
-        }
-    };
+    // COPY REPORTS
+    window.copyReportToClipboard = () => { if(lastSubmitType==='meeting') copyMeetingReport(); else copyAttendanceReport(); };
 
     window.copyAttendanceReport = () => {
-        let presentMembers = [], absentMembers = [];
-
-        document.querySelectorAll('.member-cb').forEach(c => {
-            const name = c.dataset.name;
-            const key = name.replace(/ /g,'_');
-            if (c.checked) {
-                const subbed = subbedMembers[name];
-                presentMembers.push(subbed ? `${name} (Subbed w/ ${subbed})` : name);
-            } else {
-                const sel = document.querySelector(`#reason-${key} .reason-select`);
-                const custom = document.getElementById(`other-reason-${key}`);
-                const reason = sel ? (sel.value === 'Other' && custom ? custom.value : sel.value) : 'Absent';
+        let presentMembers=[], absentMembers=[];
+        document.querySelectorAll('.member-cb').forEach(c=>{
+            const name=c.dataset.name, key=name.replace(/ /g,'_');
+            if (c.checked) { const sub=subbedMembers[name]; presentMembers.push(sub?`${name} (Subbed w/ ${sub})`:name); }
+            else {
+                const sel=document.querySelector(`#reason-${key} .reason-select`), custom=document.getElementById(`other-reason-${key}`);
+                const reason=sel?(sel.value==='Other'&&custom?custom.value:sel.value):'Absent';
                 absentMembers.push(`${name} (${reason})`);
             }
         });
-
-        // Build header based on type
-        let header = '';
-        const finalSched = document.getElementById('hidden-final-sched').value;
-        if (currentGroup === 'Other Occasions') {
-            const eventName = document.getElementById('special-name').value || 'Other Occasion';
-            const eventDate = document.getElementById('special-date').value;
-            const eventTime = document.getElementById('special-time').value;
-            header = `📋  Serve Attendance\n${eventName} — ${eventDate} ${eventTime}`;
+        const finalSched=document.getElementById('hidden-final-sched').value;
+        let header='';
+        if (currentGroup==='Other Occasions') {
+            const en=document.getElementById('special-name').value||'Other Occasion', ed=document.getElementById('special-date').value, et=document.getElementById('special-time').value;
+            header=`📋  Serve Attendance\n${en} — ${ed} — ${et}`;
         } else {
-            const parts = finalSched.split(' | ');
-            const day = parts[0] || selDay;
-            const date = parts[1] || new Date().toLocaleDateString();
-            const time = parts[2] || '';
-            header = `📋  Serve Attendance\n${day} — ${date} — ${time}`;
+            const parts=finalSched.split(' | ');
+            header=`📋  Serve Attendance\n${parts[0]||selDay} — ${parts[1]||new Date().toLocaleDateString()} — ${parts[2]||''}`;
         }
-
-        const report = `${header}\n\n` +
-                      `✅ Present: ${presentMembers.join(', ') || 'None'}\n\n` +
-                      `❌ Absent: ${absentMembers.join(', ') || 'None'}\n\n` +
-                      `---\nSubmitted via Attendance Portal`;
-
-        navigator.clipboard.writeText(report)
-            .then(() => showCopyFeedback('✓ Copied to clipboard!'))
-            .catch(() => alert('Could not copy to clipboard'));
+        const report=`${header}\n\n✅ Present: ${presentMembers.join(', ')||'None'}\n\n❌ Absent: ${absentMembers.join(', ')||'None'}\n\n---\nSubmitted via Attendance Portal`;
+        navigator.clipboard.writeText(report).then(()=>showCopyFeedback('✓ Copied!')).catch(()=>alert('Could not copy'));
     };
 
     window.copyMeetingReport = () => {
-        let presentMembers = [], absentMembers = [];
-
-        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb => {
-            const member = cb.dataset.member;
-            const key = member.replace(/ /g,'_');
-            if (cb.checked) {
-                presentMembers.push(member);
-            } else {
-                const reasonDiv = document.getElementById(`mtg-reason-${key}`);
-                const sel = reasonDiv ? reasonDiv.querySelector('.mtg-reason-sel') : null;
-                const otherInput = reasonDiv ? reasonDiv.querySelector('.mtg-other-reason') : null;
-                let reason = sel ? sel.value : 'Absent';
-                if (reason === 'Other' && otherInput && otherInput.value) reason = otherInput.value;
+        let presentMembers=[], absentMembers=[];
+        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb=>{
+            const member=cb.dataset.member, key=member.replace(/ /g,'_');
+            if (cb.checked) { presentMembers.push(member); }
+            else {
+                const rd=document.getElementById(`mtg-reason-${key}`), sel=rd?rd.querySelector('.mtg-reason-sel'):null, oi=rd?rd.querySelector('.mtg-other-reason'):null;
+                let reason=sel?sel.value:'Absent'; if(reason==='Other'&&oi&&oi.value) reason=oi.value;
                 absentMembers.push(`${member} (${reason})`);
             }
         });
-
-        const mtgTypeSel = document.getElementById('meeting-type');
-        const mtgOther = document.getElementById('mtg-other-input');
-        let meetingType = mtgTypeSel ? mtgTypeSel.value : 'Meeting';
-        if (meetingType === 'Other' && mtgOther && mtgOther.value) meetingType = mtgOther.value;
-
-        const mtgDate = document.getElementById('mtg-date-input') ? document.getElementById('mtg-date-input').value : '';
-        const mtgTime = document.getElementById('mtg-time-input') ? document.getElementById('mtg-time-input').value : '';
-
-        const report = `📋  Meeting Attendance\n${meetingType} — ${mtgDate} — ${mtgTime}\n\n` +
-                      `✅ Present: ${presentMembers.join(', ') || 'None'}\n\n` +
-                      `❌ Absent: ${absentMembers.join(', ') || 'None'}\n\n` +
-                      `---\nSubmitted via Attendance Portal`;
-
-        navigator.clipboard.writeText(report)
-            .then(() => showCopyFeedback('✓ Copied to clipboard!'))
-            .catch(() => alert('Could not copy to clipboard'));
+        const sel=document.getElementById('meeting-type'), oi=document.getElementById('mtg-other-input');
+        let mt=sel?sel.value:'Meeting'; if(mt==='Other'&&oi&&oi.value) mt=oi.value;
+        const md=document.getElementById('mtg-date-input')?document.getElementById('mtg-date-input').value:'';
+        const mtime=document.getElementById('mtg-time-input')?document.getElementById('mtg-time-input').value:'';
+        const report=`📋  Meeting Attendance\n${mt} — ${md} — ${mtime}\n\n✅ Present: ${presentMembers.join(', ')||'None'}\n\n❌ Absent: ${absentMembers.join(', ')||'None'}\n\n---\nSubmitted via Attendance Portal`;
+        navigator.clipboard.writeText(report).then(()=>showCopyFeedback('✓ Copied!')).catch(()=>alert('Could not copy'));
     };
 
     window.showCopyFeedback = (message) => {
-        const feedback = document.createElement('div');
-        feedback.className = 'copy-feedback';
-        feedback.innerText = message;
-        document.body.appendChild(feedback);
-        setTimeout(() => {
-            feedback.style.animation = 'slideDown 0.3s ease reverse';
-            setTimeout(() => feedback.remove(), 300);
-        }, 2000);
+        const f=document.createElement('div'); f.className='copy-feedback'; f.innerText=message;
+        document.body.appendChild(f);
+        setTimeout(()=>{f.style.animation='slideDown 0.3s ease reverse';setTimeout(()=>f.remove(),300);},2000);
     };
 
-    // --- DIRECTORY ---
+    // DIRECTORY
     window.loadApprovedMembers = async () => {
-        const list = document.getElementById('approved-members-list');
-        list.innerHTML = '<p style="text-align:center;opacity:0.6;font-size:13px;">Loading members...</p>';
+        const list=document.getElementById('approved-members-list');
+        list.innerHTML='<p style="text-align:center;opacity:0.6;font-size:13px;">Loading members...</p>';
         try {
-            const snap = await window._getDocs(window._query(window._collection(window._db, "profiles"), window._where("is_approved","==",true)));
-            list.innerHTML = snap.empty ? '<p style="text-align:center;opacity:0.6;font-size:13px;">No approved members yet.</p>' : '';
-            snap.forEach((d) => {
-                const u = d.data();
-                const item = document.createElement('div');
-                item.className = 'directory-item';
-
-                const roleBadge = {
-                    admin: '<span style="font-size:10px;background:var(--gold);color:var(--card-bg);padding:2px 7px;border-radius:20px;font-weight:700;vertical-align:middle;margin-left:4px;">ADMIN</span>',
-                    group_leader: '<span style="font-size:10px;background:var(--accent);color:white;padding:2px 7px;border-radius:20px;font-weight:700;vertical-align:middle;margin-left:4px;">LEADER</span>',
-                    server: ''
-                }[u.role] || '';
-
-                const canEdit = window.currentUserRole === 'admin';
-
-                item.innerHTML = `
-                    <div class="directory-info">
-                        <div class="directory-name">${u.full_name}${roleBadge}</div>
-                        <div class="directory-email">${u.email}${u.username ? ' · @'+u.username : ''}</div>
-                        ${canEdit ? `<select class="role-select-inline" onchange="changeUserRole('${d.id}', this.value)" style="margin-top:6px;width:auto;">
-                            <option value="server" ${u.role==='server'?'selected':''}>Server</option>
-                            <option value="group_leader" ${u.role==='group_leader'?'selected':''}>Group Leader</option>
-                            <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
-                        </select>` : ''}
-                    </div>
-                    ${canEdit ? `<button class="btn-icon" onclick="removeServerMember('${d.id}')" title="Remove">🗑</button>` : ''}`;
+            const snap=await window._getDocs(window._query(window._collection(window._db,"profiles"),window._where("is_approved","==",true)));
+            list.innerHTML=snap.empty?'<p style="text-align:center;opacity:0.6;font-size:13px;">No approved members yet.</p>':'';
+            snap.forEach(d=>{
+                const u=d.data(), item=document.createElement('div'); item.className='directory-item';
+                const roleBadge={admin:'<span style="font-size:10px;background:var(--gold);color:var(--card-bg);padding:2px 7px;border-radius:20px;font-weight:700;vertical-align:middle;margin-left:4px;">ADMIN</span>',group_leader:'<span style="font-size:10px;background:var(--accent);color:white;padding:2px 7px;border-radius:20px;font-weight:700;vertical-align:middle;margin-left:4px;">LEADER</span>',server:''}[u.role]||'';
+                const canEdit=window.currentUserRole==='admin';
+                item.innerHTML=`<div class="directory-info">
+                    <div class="directory-name">${u.full_name}${roleBadge}</div>
+                    <div class="directory-email">${u.email}${u.username?' · @'+u.username:''}</div>
+                    ${canEdit?`<select class="role-select-inline" onchange="changeUserRole('${d.id}',this.value)" style="margin-top:6px;width:auto;">
+                        <option value="server" ${u.role==='server'?'selected':''}>Server</option>
+                        <option value="group_leader" ${u.role==='group_leader'?'selected':''}>Group Leader</option>
+                        <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+                    </select>`:''}
+                </div>
+                ${canEdit?`<button class="btn-icon" onclick="removeServerMember('${d.id}')" title="Remove">🗑</button>`:''}`;
                 list.appendChild(item);
             });
-        } catch(err) {
-            list.innerHTML = '<p style="color:var(--absent);">Error loading members: ' + err.message + '</p>';
-        }
+        } catch(err) { list.innerHTML='<p style="color:var(--absent);">Error: '+err.message+'</p>'; }
     };
-
     window.changeUserRole = async (uid, newRole) => {
-        if (!confirm(`Change this member's role to "${newRole}"?`)) {
-            loadApprovedMembers(); return;
-        }
-        try {
-            await window._updateDoc(window._doc(window._db,"profiles",uid), { role: newRole });
-            showCopyFeedback('✓ Role updated');
-            loadApprovedMembers();
-        } catch(err) { alert('Error updating role: ' + err.message); }
+        if (!confirm(`Change this member's role to "${newRole}"?`)) { loadApprovedMembers(); return; }
+        try { await window._updateDoc(window._doc(window._db,"profiles",uid),{role:newRole}); showCopyFeedback('✓ Role updated'); loadApprovedMembers(); }
+        catch(err) { alert('Error: '+err.message); }
     };
-
     window.removeServerMember = async (uid) => {
-        if (confirm('Are you sure? This action cannot be undone.')) {
-            try {
-                await window._updateDoc(window._doc(window._db,"profiles",uid), { is_approved: false });
-                loadApprovedMembers();
-                showCopyFeedback('✓ Member removed');
-            } catch(err) { alert('Error removing member'); }
+        if (confirm('Are you sure? This cannot be undone.')) {
+            try { await window._updateDoc(window._doc(window._db,"profiles",uid),{is_approved:false}); loadApprovedMembers(); showCopyFeedback('✓ Member removed'); }
+            catch(err) { alert('Error removing member'); }
         }
     };
 
-    // --- SUBMISSION ---
+    // SUBMISSION
     const submitWithConfirm = async (formId, successSection) => {
-        const form = document.getElementById(formId);
+        const form=document.getElementById(formId);
         if (!confirm('Submit this record? Please verify all information is correct.')) return false;
-        const btn = form.querySelector('.btn-primary');
-        const origText = btn.innerText;
-        btn.innerText = "Submitting...";
-        btn.disabled = true;
+        const btn=form.querySelector('.btn-primary'), origText=btn.innerText;
+        btn.innerText='Submitting...'; btn.disabled=true;
         try {
-            const r = await fetch('https://api.web3forms.com/submit', { method:'POST', body: new FormData(form) });
+            const r=await fetch('https://api.web3forms.com/submit',{method:'POST',body:new FormData(form)});
             if (r.ok) {
-                if (formId === 'form-serve') {
-                    lastSubmitType = 'attendance';
-                    saveAttendanceHistory();
-                } else if (formId === 'form-meeting') {
-                    lastSubmitType = 'meeting';
-                }
+                if (formId==='form-serve') { lastSubmitType='attendance'; saveAttendanceHistory(); }
+                else if (formId==='form-meeting') { lastSubmitType='meeting'; saveMeetingHistory(); }
                 showSection(successSection);
-            } else {
-                alert("Submission error. Please try again.");
-                btn.innerText = origText;
-                btn.disabled = false;
-            }
-        } catch(err) {
-            alert("Network error. Check your connection.");
-            btn.innerText = origText;
-            btn.disabled = false;
-        }
+            } else { alert('Submission error. Please try again.'); btn.innerText=origText; btn.disabled=false; }
+        } catch(err) { alert('Network error. Check your connection.'); btn.innerText=origText; btn.disabled=false; }
     };
 
-    // Save attendance as ONE group document + per-member history
     window.saveAttendanceHistory = async () => {
-        const finalSched = document.getElementById('hidden-final-sched').value;
-        const dateStr = new Date().toLocaleDateString();
-        const members = [];
-
-        document.querySelectorAll('.member-cb').forEach((c) => {
-            const member = c.dataset.name;
-            const key = member.replace(/ /g,'_');
-            const status = c.checked ? 'present' : 'absent';
-            const sel = document.querySelector(`#reason-${key} .reason-select`);
-            const custom = document.getElementById(`other-reason-${key}`);
-            const reason = !c.checked && sel ? (sel.value === 'Other' && custom ? custom.value : sel.value) : null;
-            const subbed = subbedMembers[member] || null;
-            members.push({ name: member, status, reason, subbed });
+        const finalSched=document.getElementById('hidden-final-sched').value;
+        const dateStr=new Date().toLocaleDateString();
+        const members=[];
+        document.querySelectorAll('.member-cb').forEach(c=>{
+            const member=c.dataset.name, key=member.replace(/ /g,'_'), status=c.checked?'present':'absent';
+            const sel=document.querySelector(`#reason-${key} .reason-select`), custom=document.getElementById(`other-reason-${key}`);
+            const reason=!c.checked&&sel?(sel.value==='Other'&&custom?custom.value:sel.value):null;
+            const subbed=subbedMembers[member]||null;
+            members.push({name:member, status, reason, subbed});
         });
-
         try {
-            // Save as one group attendance document
-            await window._addDoc(window._collection(window._db, "group_attendance"), {
-                group: currentGroup,
-                schedule: finalSched,
-                date: dateStr,
-                members: members,
-                submitted_by: window.currentUserId,
-                timestamp: window._serverTimestamp()
+            await window._addDoc(window._collection(window._db,"group_attendance"),{
+                group:currentGroup, schedule:finalSched, date:dateStr,
+                members, submitted_by:window.currentUserId, timestamp:window._serverTimestamp()
             });
-
-            // Also save individual history records for the serve history view
             for (const m of members) {
-                await window._addDoc(window._collection(window._db, "attendance_history"), {
-                    member_name: m.name,
-                    group: currentGroup,
-                    schedule: finalSched,
-                    date: dateStr,
-                    status: m.status,
-                    reason: m.reason,
-                    subbed: m.subbed,
-                    timestamp: window._serverTimestamp()
+                await window._addDoc(window._collection(window._db,"attendance_history"),{
+                    member_name:m.name, group:currentGroup, schedule:finalSched, date:dateStr,
+                    status:m.status, reason:m.reason, subbed:m.subbed, timestamp:window._serverTimestamp()
                 });
             }
-        } catch(err) {
-            console.error('Error saving attendance:', err);
-        }
+        } catch(err) { console.error('Error saving attendance:',err); }
+    };
+
+    window.saveMeetingHistory = async () => {
+        const dateStr=new Date().toLocaleDateString();
+        const mtgType=document.getElementById('meeting-type')?document.getElementById('meeting-type').value:'Meeting';
+        const mtgTime=document.getElementById('mtg-time-input')?document.getElementById('mtg-time-input').value:'';
+        const members=[];
+        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb=>{
+            const member=cb.dataset.member, key=member.replace(/ /g,'_');
+            const status=cb.checked?'present':'absent';
+            if (!cb.checked) {
+                const rd=document.getElementById(`mtg-reason-${key}`), sel=rd?rd.querySelector('.mtg-reason-sel'):null, oi=rd?rd.querySelector('.mtg-other-reason'):null;
+                let reason=sel?sel.value:'Absent'; if(reason==='Other'&&oi&&oi.value) reason=oi.value;
+                members.push({name:member, status, reason});
+            } else {
+                members.push({name:member, status});
+            }
+        });
+        try {
+            for (const m of members) {
+                await window._addDoc(window._collection(window._db,"attendance_history"),{
+                    member_name:m.name, group:'Meeting', meeting_type:mtgType, meeting_time:mtgTime, date:dateStr,
+                    status:m.status, reason:m.reason||null, timestamp:window._serverTimestamp()
+                });
+            }
+        } catch(err) { console.error('Error saving meeting:',err); }
     };
 
     document.getElementById('form-serve').onsubmit = async (e) => {
         e.preventDefault();
-        let rep = [];
-        document.querySelectorAll('.member-cb').forEach(c => {
-            const m = c.dataset.name;
-            const key = m.replace(/ /g,'_');
-            if (c.checked) {
-                const sub = subbedMembers[m];
-                rep.push(`${m}: [PRESENT]${sub ? ` (Subbed w/ ${sub})` : ''}`);
-            } else {
-                const sel = document.querySelector(`#reason-${key} .reason-select`);
-                const custom = document.getElementById(`other-reason-${key}`);
-                const note = sel ? (sel.value === 'Other' && custom ? custom.value : sel.value) : 'Absent';
+        let rep=[];
+        document.querySelectorAll('.member-cb').forEach(c=>{
+            const m=c.dataset.name, key=m.replace(/ /g,'_');
+            if (c.checked) { const sub=subbedMembers[m]; rep.push(`${m}: [PRESENT]${sub?` (Subbed w/ ${sub})`:''}`); }
+            else {
+                const sel=document.querySelector(`#reason-${key} .reason-select`), custom=document.getElementById(`other-reason-${key}`);
+                const note=sel?(sel.value==='Other'&&custom?custom.value:sel.value):'Absent';
                 rep.push(`${m}: [ABSENT] - ${note}`);
             }
         });
-        document.getElementById('hidden-report').value = rep.join(' | ');
-        await submitWithConfirm('form-serve', 'success');
+        document.getElementById('hidden-report').value=rep.join(' | ');
+        await submitWithConfirm('form-serve','success');
     };
 
     document.getElementById('form-meeting').onsubmit = async (e) => {
         e.preventDefault();
-        const attendees = getMeetingAttendees();
-        document.getElementById('meeting-attendees-hidden').value = attendees;
-        await submitWithConfirm('form-meeting', 'success');
+        document.getElementById('meeting-attendees-hidden').value=getMeetingAttendees();
+        await submitWithConfirm('form-meeting','success');
     };
 
-    // Load groups from Firestore on DOM ready, then build all UI
-    window.addEventListener('DOMContentLoaded', async () => {
-        buildGroupButtons();
-        buildMeetingList();
-        // Firestore group loading happens after login
-    });
-
-    // After login, load groups
-    const origUpdateUI = window.updateUIByRole;
-    window.updateUIByRole = async (role) => {
-        origUpdateUI(role);
-        // Load groups from Firestore and rebuild UI
-        await window.loadGroupsFromFirestore();
-    };
+    window.addEventListener('DOMContentLoaded', () => { buildGroupButtons(); buildMeetingList(); });
 </script>
 </body>
 </html>
