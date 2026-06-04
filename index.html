@@ -223,35 +223,127 @@
           } catch(err) { btn.disabled=false; btn.textContent='✓ Mark as Solved'; alert('Error: '+err.message); }
       };
 
-      // WARNINGS
-      window.loadWarningsPanel = async () => {
-          const container = document.getElementById('warnings-group-list');
+      // SUSPENSIONS
+      window.loadSuspensionsPanel = async () => {
+          const container = document.getElementById('suspensions-group-list');
           container.innerHTML = '';
           const meetingGroups = Object.keys(window.groupMembers).filter(g=>g!=='Other Occasions');
           meetingGroups.forEach(gn => {
               const btn = document.createElement('button');
               btn.className = 'btn-secondary'; btn.type = 'button'; btn.textContent = gn;
-              btn.onclick = () => { window._warningCurrentGroup=gn; loadGroupWarnings(gn); };
+              btn.style.cssText = 'margin-bottom:10px;';
+              btn.onclick = () => { window._suspensionCurrentGroup=gn; loadGroupSuspensions(gn); };
               container.appendChild(btn);
           });
-          document.getElementById('warnings-group-view').style.display = 'block';
-          document.getElementById('warnings-detail-view').style.display = 'none';
+          document.getElementById('suspensions-group-view').style.display = 'block';
+          document.getElementById('suspensions-detail-view').style.display = 'none';
       };
 
-      window.loadGroupWarnings = async (groupName) => {
-          document.getElementById('warnings-group-view').style.display = 'none';
-          document.getElementById('warnings-detail-view').style.display = 'block';
-          document.getElementById('warnings-group-title').textContent = groupName;
-          const container = document.getElementById('warnings-member-list');
-          container.innerHTML = '<p style="font-size:12px;opacity:0.6;">Calculating attendance...</p>';
+      window.loadGroupSuspensions = async (groupName) => {
+          document.getElementById('suspensions-group-view').style.display = 'none';
+          document.getElementById('suspensions-detail-view').style.display = 'block';
+          document.getElementById('suspensions-group-title').textContent = groupName;
+          const container = document.getElementById('suspensions-member-list');
+          container.innerHTML = '<p style="font-size:12px;opacity:0.6;">Loading...</p>';
           const members = window.groupMembers[groupName] || [];
           try {
-              const snap = await getDocs(query(collection(db,"attendance_history"),where("group","==",groupName)));
+              const suspendSnap = await getDocs(query(collection(db,"member_suspensions"),where("group","==",groupName)));
+              const suspended = {};
+              suspendSnap.docs.forEach(d => { suspended[d.data().member_name] = d.data().reason; });
+              container.innerHTML = '';
+              members.forEach(m => {
+                  const row = document.createElement('div');
+                  row.className = 'suspension-member-row';
+                  const isSuspended = !!suspended[m];
+                  row.innerHTML = `
+                      <div style="flex:1;">
+                          <strong>${m}</strong>
+                          ${isSuspended ? `<span style="margin-left:8px;font-size:11px;color:var(--absent);font-weight:700;">🚫 SUSPENDED</span><div style="font-size:11px;opacity:0.7;margin-top:4px;">Reason: ${suspended[m]}</div>` : ''}
+                      </div>
+                      ${isSuspended ? `<button onclick="unsuspendMember('${groupName}','${m}')" class="btn-secondary" style="flex:0;min-width:90px;margin-bottom:0;font-size:12px;">Unsuspend</button>` : `<button onclick="openSuspendModal('${groupName}','${m}')" class="btn-secondary" style="flex:0;min-width:90px;margin-bottom:0;font-size:12px;color:var(--absent);border-color:var(--absent);">Suspend</button>`}
+                  `;
+                  container.appendChild(row);
+              });
+          } catch(err) {
+              container.innerHTML = '<p style="color:var(--absent);">Error: '+err.message+'</p>';
+          }
+      };
+
+      window.openSuspendModal = (groupName, memberName) => {
+          const modal = document.createElement('div');
+          modal.className = 'subbed-modal';
+          modal.innerHTML = `<div class="subbed-modal-content"><h4>Suspend Member</h4>
+              <p style="font-size:12px;color:var(--text);margin:0 0 12px;">Are you sure you want to suspend <strong>${memberName}</strong>?</p>
+              <label style="margin-bottom:8px;">Suspension Reason</label>
+              <textarea id="suspend-reason-input" placeholder="Enter reason for suspension (required)" style="margin-bottom:12px;min-height:80px;"></textarea>
+              <div class="modal-buttons">
+                  <button class="btn-confirm" style="background:var(--absent);" onclick="confirmSuspend('${groupName}','${memberName}')">Confirm Suspension</button>
+                  <button class="btn-cancel" onclick="closeSuspendModal()">Cancel</button>
+              </div>
+          </div>`;
+          document.body.appendChild(modal);
+          setTimeout(()=>document.getElementById('suspend-reason-input').focus(),100);
+      };
+
+      window.confirmSuspend = async (groupName, memberName) => {
+          const reason = document.getElementById('suspend-reason-input').value.trim();
+          if (!reason) { alert('Please enter a suspension reason.'); return; }
+          try {
+              const id = `${groupName}_${memberName}`.replace(/ /g,'_');
+              await setDoc(doc(db,"member_suspensions",id), { group:groupName, member_name:memberName, reason, suspended_at:serverTimestamp() });
+              showCopyFeedback(`✓ ${memberName} suspended`);
+              closeSuspendModal();
+              setTimeout(()=>loadGroupSuspensions(groupName), 500);
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      window.unsuspendMember = async (groupName, memberName) => {
+          if (!confirm(`Unsuspend ${memberName}?`)) return;
+          try {
+              const id = `${groupName}_${memberName}`.replace(/ /g,'_');
+              await deleteDoc(doc(db,"member_suspensions",id));
+              showCopyFeedback(`✓ ${memberName} unsuspended`);
+              setTimeout(()=>loadGroupSuspensions(groupName), 500);
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      window.closeSuspendModal = () => { const m=document.querySelector('.subbed-modal'); if(m) m.remove(); };
+
+      // ACTIVITY TRACKER — counts BOTH serve attendance AND meeting attendance
+      window.loadActivityTrackerPanel = async () => {
+          const container = document.getElementById('activity-tracker-group-list');
+          container.innerHTML = '';
+          const meetingGroups = Object.keys(window.groupMembers).filter(g=>g!=='Other Occasions');
+          meetingGroups.forEach(gn => {
+              const btn = document.createElement('button');
+              btn.className = 'btn-secondary'; btn.type = 'button'; btn.textContent = gn;
+              btn.onclick = () => { window._activityCurrentGroup=gn; loadGroupActivity(gn); };
+              container.appendChild(btn);
+          });
+          document.getElementById('activity-tracker-group-view').style.display = 'block';
+          document.getElementById('activity-tracker-detail-view').style.display = 'none';
+      };
+
+      window.loadGroupActivity = async (groupName) => {
+          document.getElementById('activity-tracker-group-view').style.display = 'none';
+          document.getElementById('activity-tracker-detail-view').style.display = 'block';
+          document.getElementById('activity-tracker-group-title').textContent = groupName;
+          const container = document.getElementById('activity-tracker-member-list');
+          container.innerHTML = '<p style="font-size:12px;opacity:0.6;">Calculating activity...</p>';
+          const members = window.groupMembers[groupName] || [];
+          try {
+              // Fetch both serve attendance and meeting attendance
+              const serveSnap = await getDocs(query(collection(db,"attendance_records"),where("group","==",groupName)));
+              // Meeting records are stored with group='Meeting' — match by member name for members in this group
+              const meetingSnap = await getDocs(query(collection(db,"attendance_records"),where("group","==","Meeting")));
+
               const memberStats = {};
               members.forEach(m => { memberStats[m] = { present:0, absent:0, excused:0, suspended:0, total:0 }; });
-              snap.docs.forEach(d => {
+
+              // Count serve records
+              serveSnap.docs.forEach(d => {
                   const r = d.data();
-                  if (!memberStats[r.member_name]) memberStats[r.member_name] = {present:0,absent:0,excused:0,suspended:0,total:0};
+                  if (!memberStats[r.member_name]) return;
                   memberStats[r.member_name].total++;
                   if (r.status==='present') memberStats[r.member_name].present++;
                   else {
@@ -261,7 +353,21 @@
                       else if (['excused','sick','school/work'].includes(rl)) memberStats[r.member_name].excused++;
                   }
               });
-              const overrideSnap = await getDocs(query(collection(db,"warning_overrides"),where("group","==",groupName)));
+
+              // Count meeting records for members belonging to this group
+              meetingSnap.docs.forEach(d => {
+                  const r = d.data();
+                  if (!memberStats[r.member_name]) return; // only count if member belongs to this group
+                  memberStats[r.member_name].total++;
+                  if (r.status==='present') memberStats[r.member_name].present++;
+                  else {
+                      memberStats[r.member_name].absent++;
+                      const rl = (r.reason||'').toLowerCase();
+                      if (['excused','sick','school/work'].includes(rl)) memberStats[r.member_name].excused++;
+                  }
+              });
+
+              const overrideSnap = await getDocs(query(collection(db,"activity_overrides"),where("group","==",groupName)));
               const overrides = {};
               overrideSnap.docs.forEach(d => { overrides[d.data().member_name] = d.data().status; });
               container.innerHTML = '';
@@ -291,23 +397,23 @@
                           <strong>${m}</strong>
                           <span class="warning-status-badge" style="color:${statusInfo.color};border-color:${statusInfo.color};">${statusInfo.label}</span>
                       </div>
-                      <div style="font-size:11px;opacity:0.7;margin-bottom:8px;">Present: ${s.present}/${s.total} (${pct}%)</div>
+                      <div style="font-size:11px;opacity:0.7;margin-bottom:8px;">Present: ${s.present}/${s.total} (${pct}%) — Serves + Meetings</div>
                       <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;">
-                          <select onchange="overrideMemberStatus('${groupName}','${m}',this.value)" class="warning-status-select">
+                          <select onchange="overrideMemberActivity('${groupName}','${m}',this.value)" class="warning-status-select">
                               <option value="">Auto (${statusInfo.label})</option>
                               <option value="active" ${overrides[m]==='active'?'selected':''}>✓ Active</option>
                               <option value="few_absent" ${overrides[m]==='few_absent'?'selected':''}>⚠ Few Absent</option>
                               <option value="warning" ${overrides[m]==='warning'?'selected':''}>⚡ Warning</option>
                               <option value="inactive" ${overrides[m]==='inactive'?'selected':''}>✗ Inactive</option>
                           </select>
-                          <button onclick="resetMemberStatus('${groupName}','${m}')" class="warning-btn-reset">Reset</button>
-                          ${(finalStatus==='warning'||finalStatus==='inactive') ? `<button onclick="sendWarningMessage('${m}','${finalStatus}')" class="warning-btn-warn">⚠ Warn</button>` : ''}
+                          <button onclick="resetMemberActivity('${groupName}','${m}')" class="warning-btn-reset">Reset</button>
+                          ${(finalStatus==='warning'||finalStatus==='inactive') ? `<button onclick="openActivityWarningModal('${m}','${finalStatus}')" class="warning-btn-warn">⚠ Warn</button>` : ''}
                       </div>`;
                   container.appendChild(row);
               });
               const legend = document.createElement('div');
               legend.style.cssText='margin-top:16px;padding:12px;background:var(--input);border-radius:10px;border:2px solid var(--border);font-size:11px;';
-              legend.innerHTML=`<strong style="color:var(--gold);display:block;margin-bottom:8px;">Legend</strong>
+              legend.innerHTML=`<strong style="color:var(--gold);display:block;margin-bottom:8px;">Legend (Serves + Meetings combined)</strong>
                   <span style="color:var(--present);">● Active</span> ≥75% &nbsp;
                   <span style="color:#d4a017;">● Few Absent</span> 60–74% &nbsp;
                   <span style="color:#e67e22;">● Warning</span> 40–59% &nbsp;
@@ -318,39 +424,92 @@
           }
       };
 
-      window.overrideMemberStatus = async (groupName, memberName, status) => {
-          try {
-              const id = `${groupName}_${memberName}`.replace(/ /g,'_');
-              if (!status) {
-                  await deleteDoc(doc(db,"warning_overrides",id));
-              } else {
-                  await setDoc(doc(db,"warning_overrides",id), { group:groupName, member_name:memberName, status, updated_at:serverTimestamp() });
-              }
-              showCopyFeedback('✓ Status updated');
-              setTimeout(()=>loadGroupWarnings(groupName), 500);
-          } catch(err) { alert('Error: '+err.message); }
+      window.openActivityWarningModal = (memberName, status) => {
+          const modal = document.createElement('div');
+          modal.className = 'subbed-modal';
+          const title = status==='inactive' ? 'Send Inactive Notice' : 'Send Warning';
+          modal.innerHTML = `<div class="subbed-modal-content" style="max-width:380px;"><h4>${title}</h4>
+              <p style="font-size:12px;color:var(--text);margin:0 0 12px;">To: <strong>${memberName}</strong></p>
+              <div style="margin-bottom:12px;">
+                  <label style="margin-bottom:8px;">Message Type</label>
+                  <div style="display:flex;gap:8px;margin-bottom:12px;">
+                      <button type="button" class="btn-secondary" style="flex:1;margin-bottom:0;font-size:12px;" onclick="selectWarningType('custom')">Type Message</button>
+                      <button type="button" class="btn-secondary" style="flex:1;margin-bottom:0;font-size:12px;" onclick="selectWarningType('preset')">Use Pre-written</button>
+                  </div>
+              </div>
+              <textarea id="warning-msg-input" placeholder="Write your warning message here..." style="min-height:100px;display:none;"></textarea>
+              <div id="preset-msg-display" style="background:var(--input);padding:10px;border-radius:8px;border:1px solid var(--border);min-height:100px;font-size:12px;line-height:1.5;white-space:pre-wrap;display:none;"></div>
+              <div class="modal-buttons" style="margin-top:12px;">
+                  <button class="btn-confirm" onclick="confirmActivityWarning('${memberName}','${status}')">Send Warning</button>
+                  <button class="btn-cancel" onclick="closeActivityWarningModal()">Cancel</button>
+              </div>
+          </div>`;
+          document.body.appendChild(modal);
+          window._warningMemberName = memberName;
+          window._warningStatus = status;
+          window._warningType = 'preset';
+          selectWarningType('preset');
       };
 
-      window.resetMemberStatus = async (groupName, memberName) => {
-          try {
-              const id = `${groupName}_${memberName}`.replace(/ /g,'_');
-              await deleteDoc(doc(db,"warning_overrides",id));
-              showCopyFeedback('✓ Status reset to auto');
-              setTimeout(()=>loadGroupWarnings(groupName), 500);
-          } catch(err) { alert('Error: '+err.message); }
+      window.selectWarningType = (type) => {
+          window._warningType = type;
+          const custom = document.getElementById('warning-msg-input');
+          const preset = document.getElementById('preset-msg-display');
+          if (type === 'custom') {
+              custom.style.display = 'block';
+              preset.style.display = 'none';
+              custom.focus();
+          } else {
+              custom.style.display = 'none';
+              preset.style.display = 'block';
+              const msg = window._warningStatus==='inactive'
+                  ? `⚠️ ATTENDANCE NOTICE\n\nDear ${window._warningMemberName},\n\nYour attendance record has been flagged as INACTIVE. Please coordinate with your group leader or the executive officers as soon as possible.\n\n— Executive Officers, Ministry of Altar Servers`
+                  : `⚠️ ATTENDANCE WARNING\n\nDear ${window._warningMemberName},\n\nYour attendance has been marked with a WARNING. Please improve your attendance or communicate valid reasons to your group leader.\n\n— Executive Officers, Ministry of Altar Servers`;
+              preset.textContent = msg;
+          }
       };
 
-      window.sendWarningMessage = async (memberName, status) => {
-          const label = status==='inactive' ? 'Inactive' : 'Warning';
-          const msg = status==='inactive'
-              ? `⚠️ ATTENDANCE NOTICE\n\nDear ${memberName},\n\nYour attendance record has been flagged as INACTIVE. Please coordinate with your group leader or the executive officers as soon as possible.\n\n— Executive Officers, Ministry of Altar Servers`
-              : `⚠️ ATTENDANCE WARNING\n\nDear ${memberName},\n\nYour attendance has been marked with a WARNING. Please improve your attendance or communicate valid reasons to your group leader.\n\n— Executive Officers, Ministry of Altar Servers`;
+      window.confirmActivityWarning = async (memberName, status) => {
+          let msg = '';
+          if (window._warningType === 'custom') {
+              msg = document.getElementById('warning-msg-input').value.trim();
+              if (!msg) { alert('Please enter a warning message.'); return; }
+          } else {
+              msg = window._warningStatus==='inactive'
+                  ? `⚠️ ATTENDANCE NOTICE\n\nDear ${memberName},\n\nYour attendance record has been flagged as INACTIVE. Please coordinate with your group leader or the executive officers as soon as possible.\n\n— Executive Officers, Ministry of Altar Servers`
+                  : `⚠️ ATTENDANCE WARNING\n\nDear ${memberName},\n\nYour attendance has been marked with a WARNING. Please improve your attendance or communicate valid reasons to your group leader.\n\n— Executive Officers, Ministry of Altar Servers`;
+          }
           try {
               await addDoc(collection(db,"member_warnings"), {
-                  member_name: memberName, status: label, message: msg,
+                  member_name: memberName, status: status==='inactive' ? 'Inactive' : 'Warning', message: msg,
                   sent_at: serverTimestamp(), sent_by: window.currentUserId, read: false
               });
               alert(`Warning message sent to ${memberName}'s serve history.`);
+              closeActivityWarningModal();
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      window.closeActivityWarningModal = () => { const m=document.querySelector('.subbed-modal'); if(m) m.remove(); };
+
+      window.overrideMemberActivity = async (groupName, memberName, status) => {
+          try {
+              const id = `${groupName}_${memberName}`.replace(/ /g,'_');
+              if (!status) {
+                  await deleteDoc(doc(db,"activity_overrides",id));
+              } else {
+                  await setDoc(doc(db,"activity_overrides",id), { group:groupName, member_name:memberName, status, updated_at:serverTimestamp() });
+              }
+              showCopyFeedback('✓ Activity status updated');
+              setTimeout(()=>loadGroupActivity(groupName), 500);
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      window.resetMemberActivity = async (groupName, memberName) => {
+          try {
+              const id = `${groupName}_${memberName}`.replace(/ /g,'_');
+              await deleteDoc(doc(db,"activity_overrides",id));
+              showCopyFeedback('✓ Activity status reset to auto');
+              setTimeout(()=>loadGroupActivity(groupName), 500);
           } catch(err) { alert('Error: '+err.message); }
       };
 
@@ -367,6 +526,124 @@
           meetingGroups.forEach(gn => { all = all.concat(window.groupMembers[gn]); });
           window.groupMembers['Other Occasions'] = all;
           buildGroupButtons(); buildMeetingList(); buildGroupMembersEditor();
+      };
+
+      // ======= ARCHIVE (soft delete) functions =======
+      // Move attendance record to archive
+      window.archiveAttendance = async (id) => {
+          if (!confirm('Move this attendance record to archive?')) return;
+          try {
+              const snap = await getDoc(doc(db,"attendance_records",id));
+              if (!snap.exists()) { alert('Record not found.'); return; }
+              const data = snap.data();
+              await addDoc(collection(db,"archive_attendance"), { ...data, archived_at: serverTimestamp(), archived_by: window.currentUserId });
+              await deleteDoc(doc(db,"attendance_records",id));
+              showCopyFeedback('✓ Record archived');
+              loadMemberHistory(currentHistoryMember);
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      // Move warning to archive
+      window.archiveWarning = async (id) => {
+          if (!confirm('Move this warning to archive?')) return;
+          try {
+              const snap = await getDoc(doc(db,"member_warnings",id));
+              if (!snap.exists()) { alert('Warning not found.'); return; }
+              const data = snap.data();
+              await addDoc(collection(db,"archive_warnings"), { ...data, archived_at: serverTimestamp(), archived_by: window.currentUserId });
+              await deleteDoc(doc(db,"member_warnings",id));
+              showCopyFeedback('✓ Warning archived');
+              loadMemberHistory(currentHistoryMember);
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      // Restore attendance from archive
+      window.restoreAttendance = async (id) => {
+          if (!confirm('Restore this attendance record?')) return;
+          try {
+              const snap = await getDoc(doc(db,"archive_attendance",id));
+              if (!snap.exists()) { alert('Archive record not found.'); return; }
+              const data = snap.data();
+              const { archived_at, archived_by, ...original } = data;
+              await addDoc(collection(db,"attendance_records"), original);
+              await deleteDoc(doc(db,"archive_attendance",id));
+              showCopyFeedback('✓ Record restored');
+              loadArchive(window._archiveCurrentTab || 'attendance');
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      // Restore warning from archive
+      window.restoreWarning = async (id) => {
+          if (!confirm('Restore this warning?')) return;
+          try {
+              const snap = await getDoc(doc(db,"archive_warnings",id));
+              if (!snap.exists()) { alert('Archive warning not found.'); return; }
+              const data = snap.data();
+              const { archived_at, archived_by, ...original } = data;
+              await addDoc(collection(db,"member_warnings"), original);
+              await deleteDoc(doc(db,"archive_warnings",id));
+              showCopyFeedback('✓ Warning restored');
+              loadArchive(window._archiveCurrentTab || 'warnings');
+          } catch(err) { alert('Error: '+err.message); }
+      };
+
+      // Load archive panel
+      window.loadArchive = async (tab='attendance') => {
+          window._archiveCurrentTab = tab;
+          ['attendance','warnings'].forEach(t => {
+              const el = document.getElementById(`archive-tab-${t}`);
+              if (el) el.style.borderColor = t===tab ? 'var(--gold)' : 'var(--border)';
+          });
+          const list = document.getElementById('archive-list');
+          list.innerHTML = '<p style="font-size:12px;opacity:0.6;">Loading archive...</p>';
+          try {
+              if (tab === 'attendance') {
+                  const snap = await getDocs(collection(db,"archive_attendance"));
+                  list.innerHTML = snap.empty ? '<p style="font-size:12px;opacity:0.6;">No archived attendance records.</p>' : '';
+                  const docs = snap.docs.map(d=>({id:d.id,...d.data()}))
+                      .sort((a,b)=>(b.archived_at?.toDate?.()??0)-(a.archived_at?.toDate?.()??0));
+                  docs.forEach(r => {
+                      const div = document.createElement('div');
+                      div.className = 'archive-item';
+                      const archivedDate = r.archived_at ? r.archived_at.toDate().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Unknown';
+                      const origDate = r.timestamp ? r.timestamp.toDate().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : r.date || 'Unknown';
+                      div.innerHTML = `
+                          <div class="archive-item-header">
+                              <strong>${r.member_name}</strong>
+                              <span class="history-status ${r.status==='present'?'present':'absent'}">${r.status?.toUpperCase()}</span>
+                          </div>
+                          <div style="font-size:11px;opacity:0.65;margin:4px 0;">Group: ${r.group} &bull; Date: ${origDate}</div>
+                          ${r.reason ? `<div style="font-size:11px;opacity:0.7;">Reason: ${r.reason}</div>` : ''}
+                          ${r.schedule ? `<div style="font-size:11px;opacity:0.65;">Schedule: ${r.schedule}</div>` : ''}
+                          <div style="font-size:10px;color:var(--gold);margin-top:6px;">Archived: ${archivedDate}</div>
+                          <button onclick="restoreAttendance('${r.id}')" class="btn-secondary" style="margin-top:10px;font-size:12px;min-height:36px;">↩ Restore</button>
+                      `;
+                      list.appendChild(div);
+                  });
+              } else {
+                  const snap = await getDocs(collection(db,"archive_warnings"));
+                  list.innerHTML = snap.empty ? '<p style="font-size:12px;opacity:0.6;">No archived warnings.</p>' : '';
+                  const docs = snap.docs.map(d=>({id:d.id,...d.data()}))
+                      .sort((a,b)=>(b.archived_at?.toDate?.()??0)-(a.archived_at?.toDate?.()??0));
+                  docs.forEach(r => {
+                      const div = document.createElement('div');
+                      div.className = 'archive-item';
+                      const archivedDate = r.archived_at ? r.archived_at.toDate().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Unknown';
+                      const sentDate = r.sent_at ? r.sent_at.toDate().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Unknown';
+                      div.innerHTML = `
+                          <div class="archive-item-header">
+                              <strong>${r.member_name}</strong>
+                              <span class="history-status notice">⚠ ${r.status || 'Warning'}</span>
+                          </div>
+                          <div style="font-size:11px;opacity:0.65;margin:4px 0;">Sent: ${sentDate}</div>
+                          <div style="font-size:12px;line-height:1.5;margin-top:6px;white-space:pre-wrap;">${r.message}</div>
+                          <div style="font-size:10px;color:var(--gold);margin-top:6px;">Archived: ${archivedDate}</div>
+                          <button onclick="restoreWarning('${r.id}')" class="btn-secondary" style="margin-top:10px;font-size:12px;min-height:36px;">↩ Restore</button>
+                      `;
+                      list.appendChild(div);
+                  });
+              }
+          } catch(err) { list.innerHTML = '<p style="color:var(--absent);">Error: '+err.message+'</p>'; }
       };
     </script>
     
@@ -504,6 +781,31 @@
         .history-status.excused { background:rgba(230,126,34,0.15);color:var(--warning-orange); }
         .history-status.suspended { background:rgba(0,0,0,0.15);color:var(--warning-black); }
         .history-status.notice { background:rgba(184,134,11,0.15);color:var(--gold); }
+        .history-activity-badge { display:inline-block;margin-left:8px;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700; }
+        .badge-active { background:rgba(40,167,69,0.15);color:var(--present); }
+        .badge-few-absent { background:rgba(212,160,23,0.15);color:#d4a017; }
+        .badge-warning { background:rgba(230,126,34,0.15);color:var(--warning-orange); }
+        .badge-inactive { background:rgba(220,53,69,0.15);color:var(--absent); }
+        .badge-suspended { background:rgba(0,0,0,0.15);color:var(--warning-black); }
+
+        /* Member button in history - activity highlight + warning caution sign */
+        .history-member-btn {
+            display:flex; align-items:center; justify-content:space-between;
+            width:100%; text-align:left; padding:12px 14px;
+            background:transparent; border:2px solid var(--border);
+            border-radius:10px; margin-bottom:8px;
+            font-family:inherit; font-size:13px; font-weight:600;
+            color:var(--text); cursor:pointer;
+            transition:all 0.2s ease;
+        }
+        .history-member-btn:hover { border-color:var(--gold); background:rgba(184,134,11,0.04); }
+        .history-member-btn.status-active { border-left:4px solid var(--present); }
+        .history-member-btn.status-few-absent { border-left:4px solid #d4a017; }
+        .history-member-btn.status-warning { border-left:4px solid var(--warning-orange); }
+        .history-member-btn.status-inactive { border-left:4px solid var(--absent); }
+        .history-member-btn.status-suspended { border-left:4px solid var(--warning-black); background:rgba(220,53,69,0.04); }
+        .history-member-meta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+        .caution-icon { font-size:14px; animation:pulse 2s infinite; }
 
         .footer { width:100%;text-align:center;font-size:11px;color:var(--text);opacity:0.6;padding:28px 10px;line-height:2;border-top:2px solid var(--border);margin-top:20px;transition:opacity 0.3s ease; }
         .footer:hover { opacity:0.8; }
@@ -542,6 +844,7 @@
         .day-btn-row .btn-secondary { flex:1;height:42px;min-height:42px;margin-bottom:0;font-size:13px; }
 
         .admin-section { margin-top:16px;border-top:2px solid var(--border);padding-top:14px; }
+        .admin-divider { height:2px;background:linear-gradient(to right,transparent,var(--gold),transparent);margin:20px 0;border-radius:2px; }
         .menu-divider { height:1px;background:var(--border);margin:14px 0; }
 
         .badge { display:none;background:var(--absent);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;font-weight:700;line-height:20px;text-align:center;margin-left:6px;animation:pulse 2s infinite;vertical-align:middle;align-items:center;justify-content:center; }
@@ -610,10 +913,14 @@
         .concern-success-box { text-align:center;padding:30px 10px;animation:floatUp 0.6s ease; }
         .concern-success-icon { font-size:64px;display:block;margin-bottom:16px;animation:bounceIn 0.6s ease; }
 
-        /* WARNINGS PANEL - PROPERLY FIXED */
+        /* ACTIVITY TRACKER & SUSPENSIONS */
         .warning-member-row { 
             padding:14px; border-radius:12px; margin-bottom:10px; border:2px solid; 
             transition:all 0.3s ease; animation:fadeInUp 0.4s ease; 
+        }
+        .suspension-member-row {
+            padding:14px; border-radius:12px; margin-bottom:10px; border:2px solid var(--border);
+            background:var(--input); transition:all 0.3s ease; display:flex; gap:12px; align-items:center;
         }
         .warning-row-header { 
             display:flex; justify-content:space-between; align-items:center; gap:8px; 
@@ -652,6 +959,33 @@
             background:rgba(163,0,0,0.1);
         }
 
+        /* Suspended member row in serve attendance */
+        .member-suspended {
+            background:rgba(220,53,69,0.08) !important;
+            border-color:var(--absent) !important;
+            opacity: 0.75;
+        }
+        .member-suspended .member-main {
+            pointer-events: none;
+        }
+        .member-suspended input[type="checkbox"] {
+            opacity: 0.5;
+            cursor: not-allowed !important;
+            pointer-events: none;
+        }
+        .suspended-warning { color:var(--absent); font-weight:700; font-size:12px; }
+
+        /* Archive */
+        .archive-item {
+            background:var(--input); padding:14px; border-radius:10px; margin-bottom:10px;
+            border:2px solid var(--border); border-left:4px solid var(--gold);
+            transition:all 0.2s ease; animation:fadeInUp 0.4s ease;
+        }
+        .archive-item:hover { border-color:var(--gold); }
+        .archive-item-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+        .archive-tabs { display:flex; gap:8px; margin-bottom:16px; }
+        .archive-tabs button { flex:1; height:40px; min-height:40px; margin-bottom:0; font-size:13px; }
+
         @media (max-width:480px) {
             .portal-container { width:96%;padding:18px 16px; }
             .group-grid { grid-template-columns:1fr; }
@@ -684,7 +1018,7 @@
     <section id="login-section" class="section active">
         <h2>Ministry Login</h2>
         <input type="text" id="login-email" placeholder="Email Address or Username" autocomplete="username">
-        <input type="password" id="login-pass" placeholder="Password" autocomplete="current-password">
+        <input type="password" id="login-pass" placeholder="Password" autocomplete="current-password" onkeypress="if(event.key==='Enter') handleLogin()">
         <button class="btn-primary" onclick="handleLogin()">Sign In</button>
         <p>New? <a href="#" onclick="showSection('register-section');return false;">Register here</a></p>
         <p><button class="link-btn" onclick="showSection('forgot-section')">Forgot password?</button></p>
@@ -725,17 +1059,22 @@
             <button class="btn-logout" onclick="handleLogout()">Logout</button>
         </div>
         <button id="history-btn" class="btn-secondary" onclick="showSection('serve-history')" style="display:none;">📊 Serve History</button>
-        <button id="attend-btn" class="btn-secondary" onclick="showSection('group-select')" style="display:none;">📋 Submit Attendance</button>
+        <button id="attend-btn" class="btn-secondary" onclick="showSection('group-select')" style="display:none;">📋 Submit Serve Attendance</button>
         <button id="meeting-btn" class="btn-secondary" onclick="showSection('meeting-form')" style="display:none;">📝 Meeting Log</button>
         <button id="concern-btn" class="btn-secondary" onclick="showSection('concern-form')" style="display:none;">💬 Concerns &amp; Feedback</button>
         <div id="admin-gate" style="display:none;" class="admin-section">
             <div class="menu-divider"></div>
+            <h3 style="font-size:14px;margin-bottom:12px;">Admin Panel - Operations</h3>
             <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('group-members-panel')">👥 Group Members</button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('activity-tracker-panel')">⚠️ Activity Tracker</button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('concerns-admin-panel')">📨 Concerns &amp; Feedback</button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);margin-bottom:0;" onclick="showSection('suspensions-panel')">🚫 Suspensions</button>
+            <div class="admin-divider"></div>
+            <h3 style="font-size:14px;margin-bottom:12px;">Admin Panel - Account Management</h3>
             <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('member-directory')">📇 Member Directory</button>
             <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('admin-panel')">👤 Pending Approvals <span class="badge" id="pending-badge"></span></button>
             <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('pw-requests-panel')">🔑 Password Requests <span class="badge" id="pw-request-badge"></span></button>
-            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);" onclick="showSection('concerns-admin-panel')">📨 Concerns &amp; Feedback <span class="badge" id="concerns-badge"></span></button>
-            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);margin-bottom:0;" onclick="showSection('warnings-panel')">⚠️ Activity Warnings</button>
+            <button class="btn-secondary" style="border-color:var(--gold);color:var(--gold);margin-bottom:0;" onclick="showSection('archive-panel')">🗃️ Archive</button>
         </div>
     </section>
 
@@ -746,7 +1085,7 @@
         <div class="group-grid" id="group-buttons"></div>
     </section>
 
-    <!-- ATTENDANCE FORM -->
+    <!-- SERVE ATTENDANCE FORM -->
     <section id="serve-form" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('group-select')">← Back</button>
         <div class="group-title-divider">
@@ -789,7 +1128,7 @@
             <div id="checklist-container"></div>
             <label>Notes:</label>
             <textarea name="closing_notes" placeholder="Observations or remarks..."></textarea>
-            <button type="submit" class="btn-primary">Submit Records</button>
+            <button type="submit" class="btn-primary" id="serve-submit-btn">Submit Serve Attendance</button>
         </form>
     </section>
 
@@ -828,7 +1167,7 @@
             <input type="hidden" id="meeting-attendees-hidden" name="attendance_list">
             <label>Notes</label>
             <textarea name="meeting_notes" placeholder="Key points, decisions, announcements..."></textarea>
-            <button type="submit" class="btn-primary">Submit Log</button>
+            <button type="submit" class="btn-primary" id="meeting-submit-btn">Submit Meeting Log</button>
         </form>
     </section>
 
@@ -884,13 +1223,13 @@
     <!-- SUCCESS -->
     <section id="success" class="section" style="text-align:center;padding:20px 0;">
         <img src="https://imgs.search.brave.com/OQgS9eektGozBD6SRzUZe0U_7fyOZaXQwy5OVlrAUH4/rs:fit:860:0:0:0/g:ce/aHR0cDovL2NhdGhv/bGljc2FpbnRzLmlu/Zm8vd3AtY29udGVu/dC91cGxvYWRzL2lt/Zy1TYWludC1UYXJj/aXNpdXMuanBn" class="success-image" alt="Success">
-        <h2 style="color:var(--gold);margin-bottom:5px;">Attendance of your group is Successfully Submitted!</h2>
+        <h2 style="color:var(--gold);margin-bottom:5px;">Attendance Successfully Submitted!</h2>
         <p style="font-size:13px;opacity:0.8;margin-bottom:20px;">Amare Et Servire Domino!</p>
         <button class="btn-copy-report" id="copy-report-btn" onclick="copyReportToClipboard()">📋 Copy Report for GC</button>
         <button class="btn-primary" onclick="returnHome()">Return Home</button>
     </section>
 
-    <!-- ADMIN PANEL -->
+    <!-- ADMIN PANEL - PENDING APPROVALS -->
     <section id="admin-panel" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
         <h3>Pending Approvals</h3>
@@ -920,7 +1259,7 @@
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
         <h3>Edit Group Members</h3>
         <p style="font-size:13px;opacity:0.7;margin-bottom:16px;">Add, remove, or edit member names in each group.</p>
-        <div id="group-members-container"></div>
+        <div id="group-members-container" style="max-height:60vh;overflow-y:auto;padding-right:8px;"></div>
     </section>
 
     <!-- MEMBER DIRECTORY -->
@@ -930,20 +1269,48 @@
         <div id="approved-members-list"></div>
     </section>
 
-    <!-- WARNINGS PANEL -->
-    <section id="warnings-panel" class="section">
+    <!-- ACTIVITY TRACKER PANEL -->
+    <section id="activity-tracker-panel" class="section">
         <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
-        <h3>⚠️ Activity Warnings</h3>
-        <p style="font-size:13px;opacity:0.7;margin-bottom:16px;">Track server attendance and send warnings to inactive members.</p>
-        <div id="warnings-group-view">
+        <h3>⚠️ Activity Tracker</h3>
+        <p style="font-size:13px;opacity:0.7;margin-bottom:16px;">Track server attendance and send warnings to inactive members. Counts serve attendance <strong>and</strong> meetings.</p>
+        <div id="activity-tracker-group-view">
             <p style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:10px;">Select a group to review:</p>
-            <div id="warnings-group-list" class="group-grid"></div>
+            <div id="activity-tracker-group-list" class="group-grid"></div>
         </div>
-        <div id="warnings-detail-view" style="display:none;">
-            <button class="btn-secondary btn-sm-nav" onclick="document.getElementById('warnings-group-view').style.display='block';document.getElementById('warnings-detail-view').style.display='none';">← Groups</button>
-            <h3 id="warnings-group-title" style="text-align:center;margin:0 0 16px;"></h3>
-            <div id="warnings-member-list"></div>
+        <div id="activity-tracker-detail-view" style="display:none;">
+            <button class="btn-secondary btn-sm-nav" onclick="document.getElementById('activity-tracker-group-view').style.display='block';document.getElementById('activity-tracker-detail-view').style.display='none';">← Groups</button>
+            <h3 id="activity-tracker-group-title" style="text-align:center;margin:0 0 16px;"></h3>
+            <div id="activity-tracker-member-list"></div>
         </div>
+    </section>
+
+    <!-- SUSPENSIONS PANEL -->
+    <section id="suspensions-panel" class="section">
+        <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
+        <h3>🚫 Suspensions</h3>
+        <p style="font-size:13px;opacity:0.7;margin-bottom:16px;">Suspend or unsuspend server members with reason.</p>
+        <div id="suspensions-group-view">
+            <p style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:10px;">Select a group:</p>
+            <div id="suspensions-group-list"></div>
+        </div>
+        <div id="suspensions-detail-view" style="display:none;">
+            <button class="btn-secondary btn-sm-nav" onclick="document.getElementById('suspensions-group-view').style.display='block';document.getElementById('suspensions-detail-view').style.display='none';">← Groups</button>
+            <h3 id="suspensions-group-title" style="text-align:center;margin:0 0 16px;"></h3>
+            <div id="suspensions-member-list"></div>
+        </div>
+    </section>
+
+    <!-- ARCHIVE PANEL (Admin only) -->
+    <section id="archive-panel" class="section">
+        <button class="btn-secondary btn-sm-nav" onclick="showSection('main-menu')">← Back</button>
+        <h3>🗃️ Archive</h3>
+        <p style="font-size:13px;opacity:0.7;margin-bottom:16px;">View and restore archived attendance records and warnings.</p>
+        <div class="archive-tabs">
+            <button id="archive-tab-attendance" class="btn-secondary" style="border-color:var(--gold);" onclick="loadArchive('attendance')">📋 Attendance</button>
+            <button id="archive-tab-warnings" class="btn-secondary" onclick="loadArchive('warnings')">⚠️ Warnings</button>
+        </div>
+        <div id="archive-list"><p style="font-size:12px;opacity:0.6;">Loading archive...</p></div>
     </section>
 
 </div>
@@ -983,6 +1350,9 @@
     let currentHistoryGroup = "", currentHistoryMember = "";
     let lastSubmitType = "";
 
+    // Cache for suspended members — loaded when opening serve form
+    window._suspendedCache = {}; // memberName -> reason
+
     window.addEventListener('DOMContentLoaded', () => {
         const today = new Date().toISOString().split('T')[0];
         document.querySelectorAll('input[type="date"]').forEach(i => { if(!i.value) i.value = today; });
@@ -1013,7 +1383,9 @@
         if (id==='admin-panel') loadPending();
         if (id==='pw-requests-panel') loadPasswordRequests();
         if (id==='concerns-admin-panel') loadConcerns('open');
-        if (id==='warnings-panel') loadWarningsPanel();
+        if (id==='activity-tracker-panel') loadActivityTrackerPanel();
+        if (id==='suspensions-panel') loadSuspensionsPanel();
+        if (id==='archive-panel') loadArchive('attendance');
         if (id==='meeting-form') {
             buildMeetingList();
             const officerInput = document.getElementById('officer-name-input');
@@ -1037,17 +1409,56 @@
         });
     };
 
-    window.selectGroup = (gn) => {
+    // Load suspended members for a group into cache
+    window.loadSuspendedForGroup = async (groupName) => {
+        window._suspendedCache = {};
+        try {
+            const snap = await window._getDocs(
+                window._query(window._collection(window._db,"member_suspensions"), window._where("group","==",groupName))
+            );
+            snap.docs.forEach(d => {
+                window._suspendedCache[d.data().member_name] = d.data().reason || 'Suspended';
+            });
+        } catch(err) { console.error('Error loading suspensions:', err); }
+    };
+
+    window.selectGroup = async (gn) => {
         currentGroup = gn;
         document.getElementById('form-title').innerText = gn;
         const cont = document.getElementById('checklist-container');
         cont.innerHTML = ''; subbedMembers = {};
+
+        // Load suspensions for this group (except Other Occasions which spans all groups)
+        if (gn !== 'Other Occasions') {
+            await window.loadSuspendedForGroup(gn);
+        } else {
+            // For Other Occasions load all suspensions
+            window._suspendedCache = {};
+            try {
+                const snap = await window._getDocs(window._collection(window._db,"member_suspensions"));
+                snap.docs.forEach(d => {
+                    window._suspendedCache[d.data().member_name] = d.data().reason || 'Suspended';
+                });
+            } catch(err) {}
+        }
+
         if (gn==='Other Occasions') { const ob = document.querySelector('.day-btn:nth-child(3)'); if(ob) setDay('Other',ob); }
         window.groupMembers[gn].forEach(m => {
             const key = m.replace(/ /g,'_');
+            const isSuspended = !!window._suspendedCache[m];
             const row = document.createElement('div');
-            row.className = 'member-row'; row.id = `member-row-${key}`;
-            if (gn==='Other Occasions') {
+            row.className = 'member-row';
+            if (isSuspended) row.classList.add('member-suspended');
+            row.id = `member-row-${key}`;
+
+            if (isSuspended) {
+                // Suspended: show as auto-absent, unclickable, reason=Suspended
+                row.innerHTML = `<div class="member-main">
+                    <span>${m} <span class="suspended-warning">🚫 SUSPENDED</span></span>
+                    <input type="checkbox" class="member-cb" data-name="${m}" data-suspended="true" disabled>
+                </div>
+                <div style="margin-top:8px;font-size:11px;opacity:0.7;">Reason: ${window._suspendedCache[m]}</div>`;
+            } else if (gn==='Other Occasions') {
                 row.innerHTML = `<div class="member-main"><span>${m}</span><div style="display:flex;gap:6px;align-items:center;">
                     <button type="button" class="btn-subbed" onclick="openSubbedModal('${m}')" style="display:none;" id="subbed-btn-${key}">Subbed</button>
                     <input type="checkbox" checked onchange="toggleReasonAndSubbed(this,'${m}')" class="member-cb" data-name="${m}">
@@ -1060,7 +1471,7 @@
                 <div class="reason-box" id="reason-${key}">
                     <select onchange="toggleOtherReason(this.value,'${m}')" class="reason-select">
                         <option>Unexcused</option><option>Excused</option><option>Sick</option>
-                        <option>School/Work</option><option>Suspended</option><option value="Other">Other...</option>
+                        <option>School/Work</option><option value="Other">Other...</option>
                     </select>
                     <input type="text" id="other-reason-${key}" placeholder="Please specify reason" style="display:none;margin-top:8px;">
                 </div><div class="subbed-info-tag" id="subbed-info-${key}"></div>`;
@@ -1097,23 +1508,106 @@
             container.appendChild(btn);
         });
     };
-    window.loadHistoryMembers = (groupName) => {
+
+    window.loadHistoryMembers = async (groupName) => {
         const container = document.getElementById('history-members-list');
+        container.innerHTML = '<p style="font-size:12px;opacity:0.6;">Loading...</p>';
+
+        // Fetch suspensions for this group
+        const suspendedInGroup = new Set();
+        try {
+            const suspSnap = await window._getDocs(
+                window._query(window._collection(window._db,"member_suspensions"), window._where("group","==",groupName))
+            );
+            suspSnap.docs.forEach(d => suspendedInGroup.add(d.data().member_name));
+        } catch(err) {}
+
+        // Fetch warnings for all members in group — to know who has warnings
+        const membersWithWarnings = new Set();
+        try {
+            const members = window.groupMembers[groupName] || [];
+            for (const m of members) {
+                const wSnap = await window._getDocs(
+                    window._query(window._collection(window._db,"member_warnings"), window._where("member_name","==",m))
+                );
+                if (!wSnap.empty) membersWithWarnings.add(m);
+            }
+        } catch(err) {}
+
+        // Fetch activity overrides and compute auto status for members
+        const activityOverrides = {};
+        try {
+            const ovSnap = await window._getDocs(
+                window._query(window._collection(window._db,"activity_overrides"), window._where("group","==",groupName))
+            );
+            ovSnap.docs.forEach(d => { activityOverrides[d.data().member_name] = d.data().status; });
+        } catch(err) {}
+
+        // Compute attendance rates per member
+        const memberStats = {};
+        const members = window.groupMembers[groupName] || [];
+        members.forEach(m => { memberStats[m] = { present:0, total:0 }; });
+        try {
+            const serveSnap = await window._getDocs(
+                window._query(window._collection(window._db,"attendance_records"), window._where("group","==",groupName))
+            );
+            serveSnap.docs.forEach(d => {
+                const r = d.data();
+                if (!memberStats[r.member_name]) return;
+                memberStats[r.member_name].total++;
+                if (r.status==='present') memberStats[r.member_name].present++;
+            });
+            const meetSnap = await window._getDocs(
+                window._query(window._collection(window._db,"attendance_records"), window._where("group","==","Meeting"))
+            );
+            meetSnap.docs.forEach(d => {
+                const r = d.data();
+                if (!memberStats[r.member_name]) return;
+                memberStats[r.member_name].total++;
+                if (r.status==='present') memberStats[r.member_name].present++;
+            });
+        } catch(err) {}
+
         container.innerHTML = '';
-        window.groupMembers[groupName].forEach(member => {
+        members.forEach(member => {
+            const s = memberStats[member] || { present:0, total:0 };
+            const rate = s.total > 0 ? (s.present/s.total) : 1;
+            let autoStatus = rate >= 0.75 ? 'active' : rate >= 0.6 ? 'few_absent' : rate >= 0.4 ? 'warning' : 'inactive';
+            if (s.total === 0) autoStatus = 'active';
+            const finalStatus = suspendedInGroup.has(member) ? 'suspended' : (activityOverrides[member] || autoStatus);
+
+            const statusLabels = {
+                active: { css:'status-active', badge:'badge-active', label:'Active' },
+                few_absent: { css:'status-few-absent', badge:'badge-few-absent', label:'Few Absent' },
+                warning: { css:'status-warning', badge:'badge-warning', label:'Warning' },
+                inactive: { css:'status-inactive', badge:'badge-inactive', label:'Inactive' },
+                suspended: { css:'status-suspended', badge:'badge-suspended', label:'Suspended' }
+            }[finalStatus] || { css:'status-active', badge:'badge-active', label:'Active' };
+
+            const hasWarning = membersWithWarnings.has(member);
+
             const btn = document.createElement('button');
-            btn.className = 'btn-secondary'; btn.type = 'button'; btn.style.marginBottom = '8px'; btn.textContent = member;
+            btn.className = `history-member-btn ${statusLabels.css}`;
+            btn.type = 'button';
+            btn.innerHTML = `
+                <div class="history-member-meta">
+                    ${hasWarning ? '<span class="caution-icon">⚠️</span>' : ''}
+                    <span>${member}</span>
+                </div>
+                <span class="history-activity-badge ${statusLabels.badge}">${statusLabels.label}</span>
+            `;
             btn.onclick = () => { currentHistoryMember=member; loadMemberHistory(member); showHistoryDetail(); };
             container.appendChild(btn);
         });
     };
+    
     window.loadMemberHistory = async (memberName) => {
         document.getElementById('history-member-title').innerText = memberName;
         const container = document.getElementById('history-record-list');
         container.innerHTML = '<p style="font-size:12px;opacity:0.6;">Loading history...</p>';
         try {
             const snap = await window._getDocs(
-                window._query(window._collection(window._db,"attendance_history"), window._where("member_name","==",memberName))
+                window._query(window._collection(window._db,"attendance_records"), window._where("member_name","==",memberName))
             );
             const warnSnap = await window._getDocs(
                 window._query(window._collection(window._db,"member_warnings"), window._where("member_name","==",memberName))
@@ -1123,13 +1617,22 @@
                 container.innerHTML = '<p style="font-size:12px;opacity:0.6;">No attendance records yet.</p>';
                 return;
             }
-            const records = snap.docs.map(d=>({...d.data(), _type:'attendance'}));
-            const warnings = warnSnap.docs.map(d=>({...d.data(), _type:'warning'}));
-            const all = [...records, ...warnings].sort((a,b) => {
+            const records = snap.docs.map(d=>({...d.data(), _type:'attendance', _id: d.id}));
+            const warnings = warnSnap.docs.map(d=>({...d.data(), _type:'warning', _id: d.id}));
+
+            // Warnings always on top, then attendance sorted by date descending
+            const sortedWarnings = warnings.sort((a,b) => {
+                const da = a.sent_at ? a.sent_at.toDate() : new Date(0);
+                const db2 = b.sent_at ? b.sent_at.toDate() : new Date(0);
+                return db2 - da;
+            });
+            const sortedAttendance = records.sort((a,b) => {
                 const da = a.timestamp ? a.timestamp.toDate() : new Date(0);
                 const db2 = b.timestamp ? b.timestamp.toDate() : new Date(0);
                 return db2 - da;
             });
+            const all = [...sortedWarnings, ...sortedAttendance];
+
             all.forEach(record => {
                 if (record._type === 'warning') {
                     const card = document.createElement('div');
@@ -1137,7 +1640,8 @@
                     const dateStr = record.sent_at ? record.sent_at.toDate().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Unknown';
                     card.innerHTML = `<span class="history-date">⚠️ ${dateStr}</span>
                         <span class="history-status notice">NOTICE</span>
-                        <div style="font-size:12px;margin-top:6px;line-height:1.6;opacity:0.85;white-space:pre-line;">${record.message}</div>`;
+                        <div style="font-size:12px;margin-top:6px;line-height:1.6;opacity:0.85;white-space:pre-line;">${record.message}</div>
+                        ${window.currentUserRole==='admin' ? `<button class="btn-secondary" style="margin-top:10px;font-size:12px;color:var(--absent);border-color:var(--absent);" onclick="archiveWarning('${record._id}')">🗃 Archive</button>` : ''}`;
                     container.appendChild(card);
                     return;
                 }
@@ -1145,22 +1649,30 @@
                 const dateObj = record.timestamp ? record.timestamp.toDate() : new Date(record.date||0);
                 const dateStr = dateObj.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
                 
-                // ENHANCED: Show schedule with day and time for serve records
+                // Build schedule/event string
                 let schedStr = '';
                 if (record.schedule) {
                     const parts = record.schedule.split(' | ');
                     if (parts.length === 3) {
-                        schedStr = `📅 ${parts[0]} • ${parts[2]}`;
-                    } else if (record.group === 'Other Occasions') {
-                        schedStr = `📅 ${parts[0]} • ${parts[2]}`;
+                        schedStr = `📅 ${parts[0]} • ${parts[1]} • ${parts[2]}`;
+                    } else if (parts.length === 2) {
+                        // Other/special event: "EventName | date time"
+                        schedStr = `📅 ${parts[0]} • ${parts[1]}`;
+                    } else {
+                        schedStr = `📅 ${record.schedule}`;
                     }
+                } else if (record.group === 'Other Occasions' || record.group === 'other_occasions') {
+                    schedStr = '';
                 }
                 
-                // ENHANCED: Add meeting info if from meeting log
+                // Meeting info: show type + time + date
                 let meetingInfo = '';
                 if (record.meeting_type) {
+                    let mt = record.meeting_type;
+                    const mtgDateStr = record.date || '';
                     const mtgTime = record.meeting_time ? ` • ${record.meeting_time}` : '';
-                    meetingInfo = `📋 ${record.meeting_type}${mtgTime}`;
+                    const mtgDate = mtgDateStr ? ` • ${mtgDateStr}` : '';
+                    meetingInfo = `📋 ${mt}${mtgDate}${mtgTime}`;
                 }
                 
                 const subText = record.subbed ? ` — Subbed w/ <strong>${record.subbed}</strong>` : '';
@@ -1169,7 +1681,8 @@
                     item.innerHTML = `<span class="history-date">${dateStr}</span>
                         <span class="history-status present">PRESENT</span>${subText}
                         ${schedStr ? `<br><small style="opacity:0.6;font-size:11px;">${schedStr}</small>` : ''}
-                        ${meetingInfo ? `<br><small style="opacity:0.6;font-size:11px;">${meetingInfo}</small>` : ''}`;
+                        ${meetingInfo ? `<br><small style="opacity:0.6;font-size:11px;">${meetingInfo}</small>` : ''}
+                        ${window.currentUserRole==='admin' ? `<button class="btn-secondary" style="margin-top:8px;font-size:12px;color:var(--absent);border-color:var(--absent);" onclick="archiveAttendance('${record._id}')">🗃 Archive</button>` : ''}`;
                 } else {
                     const reason = (record.reason||'').toLowerCase();
                     const excusedList = ['excused','sick','school/work'];
@@ -1181,7 +1694,8 @@
                     item.innerHTML = `<span class="history-date">${dateStr}</span>
                         <span class="history-status ${statusClass}">${statusLabel}</span>${reasonText}${subText}
                         ${schedStr ? `<br><small style="opacity:0.6;font-size:11px;">${schedStr}</small>` : ''}
-                        ${meetingInfo ? `<br><small style="opacity:0.6;font-size:11px;">${meetingInfo}</small>` : ''}`;
+                        ${meetingInfo ? `<br><small style="opacity:0.6;font-size:11px;">${meetingInfo}</small>` : ''}
+                        ${window.currentUserRole==='admin' ? `<button class="btn-secondary" style="margin-top:8px;font-size:12px;color:var(--absent);border-color:var(--absent);" onclick="archiveAttendance('${record._id}')">🗃 Archive</button>` : ''}`;
                 }
                 container.appendChild(item);
             });
@@ -1206,7 +1720,7 @@
             const groupDiv = document.createElement('div'); groupDiv.className = 'group-member-edit';
             const header = document.createElement('div'); header.className = 'group-member-edit-header'; header.textContent = groupName;
             groupDiv.appendChild(header);
-            const membersContainer = document.createElement('div');
+            const membersContainer = document.createElement('div'); membersContainer.id = `members-${groupName.replace(/ /g,'_')}`;
             window.groupMembers[groupName].forEach((member, idx) => {
                 membersContainer.appendChild(createMemberEditRow(groupName, member, idx));
             });
@@ -1250,7 +1764,10 @@
         if (!newName||!newName.trim()) return;
         window.groupMembers[groupName].push(newName.trim());
         await saveGroupToFirestore(groupName);
-        buildGroupMembersEditor(); buildMeetingList();
+        const container = document.getElementById(`members-${groupName.replace(/ /g,'_')}`);
+        const row = createMemberEditRow(groupName, newName.trim(), window.groupMembers[groupName].length - 1);
+        container.appendChild(row);
+        buildMeetingList();
         showCopyFeedback(`✓ ${newName.trim()} added`);
     };
 
@@ -1266,6 +1783,7 @@
     // ATTENDANCE FORM HELPERS
     window.setAllPresent = () => {
         document.querySelectorAll('.member-cb').forEach(c => {
+            if (c.dataset.suspended === 'true') return; // skip suspended
             c.checked = true;
             const key=c.dataset.name.replace(/ /g,'_');
             const rb=document.getElementById(`reason-${key}`), sb=document.getElementById(`subbed-btn-${key}`);
@@ -1274,6 +1792,7 @@
     };
     window.setAllAbsent = () => {
         document.querySelectorAll('.member-cb').forEach(c => {
+            if (c.dataset.suspended === 'true') return; // skip suspended
             c.checked = false;
             const key=c.dataset.name.replace(/ /g,'_');
             const rb=document.getElementById(`reason-${key}`), sb=document.getElementById(`subbed-btn-${key}`);
@@ -1348,7 +1867,11 @@
     window.toggleOtherReason = (val, member) => { const el=document.getElementById(`other-reason-${member.replace(/ /g,'_')}`); if(el) el.style.display=(val==='Other')?'block':'none'; };
     window.toggleMtgOther = (val) => { document.getElementById('mtg-other-input').style.display=(val==='Other')?'block':'none'; };
     window.updateAttendanceCounter = () => {
-        let p=0,a=0; document.querySelectorAll('.member-cb').forEach(c=>{if(c.checked)p++;else a++;});
+        let p=0,a=0;
+        document.querySelectorAll('.member-cb').forEach(c=>{
+            if (c.dataset.suspended === 'true') { a++; return; } // suspended always count as absent
+            if(c.checked)p++;else a++;
+        });
         document.getElementById('present-count').textContent=p; document.getElementById('absent-count').textContent=a;
         const ai=document.getElementById('absent-counter-item'); if(ai) ai.style.display=currentGroup==='Other Occasions'?'none':'flex';
     };
@@ -1371,7 +1894,7 @@
                 const rd=document.createElement('div'); rd.className='mtg-reason-box'; rd.id=`mtg-reason-${key}`;
                 rd.innerHTML=`<select onchange="onMtgReasonChange(this,'${member}')" class="mtg-reason-sel" style="margin-bottom:6px;">
                     <option>Unexcused</option><option>Excused</option><option>Sick</option>
-                    <option>School/Work</option><option>Suspended</option><option value="Other">Other...</option>
+                    <option>School/Work</option><option value="Other">Other...</option>
                 </select><input type="text" class="mtg-other-reason" placeholder="Please specify reason" style="display:none;margin-bottom:0;">`;
                 wrap.appendChild(rd); container.appendChild(wrap);
             });
@@ -1412,46 +1935,70 @@
     window.copyReportToClipboard = () => { if(lastSubmitType==='meeting') copyMeetingReport(); else copyAttendanceReport(); };
 
     window.copyAttendanceReport = () => {
-        let presentMembers=[], absentMembers=[];
-        document.querySelectorAll('.member-cb').forEach(c=>{
-            const name=c.dataset.name, key=name.replace(/ /g,'_');
-            if (c.checked) { const sub=subbedMembers[name]; presentMembers.push(sub?`${name} (Subbed w/ ${sub})`:name); }
-            else {
-                const sel=document.querySelector(`#reason-${key} .reason-select`), custom=document.getElementById(`other-reason-${key}`);
-                const reason=sel?(sel.value==='Other'&&custom?custom.value:sel.value):'Absent';
-                absentMembers.push(`${name} (${reason})`);
+        let report = '';
+        
+        if (currentGroup === 'Other Occasions') {
+            const en = document.getElementById('special-name').value || 'Other Occasion';
+            const ed = document.getElementById('special-date').value;
+            const et = document.getElementById('special-time').value;
+            report = `SERVE ATTENDANCE\n${en}\n${ed} - ${et}\n\n`;
+        } else {
+            const parts = document.getElementById('hidden-final-sched').value.split(' | ');
+            report = `SERVE ATTENDANCE\n${parts[0] || selDay}\n${parts[1] || new Date().toLocaleDateString()} - ${parts[2] || ''}\n\n`;
+        }
+        
+        report += `${currentGroup}:\n`;
+        document.querySelectorAll('.member-cb').forEach(c => {
+            const name = c.dataset.name;
+            const key = name.replace(/ /g,'_');
+            if (c.dataset.suspended === 'true') {
+                report += `- ${name} (ABSENT - Suspended)\n`;
+            } else if (c.checked) {
+                const sub = subbedMembers[name];
+                report += `- ${name} ${sub ? `(Subbed w/ ${sub})` : '(PRESENT)'}\n`;
+            } else {
+                const sel = document.querySelector(`#reason-${key} .reason-select`);
+                const custom = document.getElementById(`other-reason-${key}`);
+                const reason = sel ? (sel.value === 'Other' && custom ? custom.value : sel.value) : 'Absent';
+                report += `- ${name} (ABSENT - ${reason})\n`;
             }
         });
-        const finalSched=document.getElementById('hidden-final-sched').value;
-        let header='';
-        if (currentGroup==='Other Occasions') {
-            const en=document.getElementById('special-name').value||'Other Occasion', ed=document.getElementById('special-date').value, et=document.getElementById('special-time').value;
-            header=`📋  Serve Attendance\n${en} — ${ed} — ${et}`;
-        } else {
-            const parts=finalSched.split(' | ');
-            header=`📋  Serve Attendance\n${parts[0]||selDay} — ${parts[1]||new Date().toLocaleDateString()} — ${parts[2]||''}`;
-        }
-        const report=`${header}\n\n✅ Present: ${presentMembers.join(', ')||'None'}\n\n❌ Absent: ${absentMembers.join(', ')||'None'}\n\n---\nSubmitted via Attendance Portal`;
-        navigator.clipboard.writeText(report).then(()=>showCopyFeedback('✓ Copied!')).catch(()=>alert('Could not copy'));
+        
+        navigator.clipboard.writeText(report).then(() => showCopyFeedback('✓ Copied!')).catch(() => alert('Could not copy'));
     };
 
     window.copyMeetingReport = () => {
-        let presentMembers=[], absentMembers=[];
-        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb=>{
-            const member=cb.dataset.member, key=member.replace(/ /g,'_');
-            if (cb.checked) { presentMembers.push(member); }
-            else {
-                const rd=document.getElementById(`mtg-reason-${key}`), sel=rd?rd.querySelector('.mtg-reason-sel'):null, oi=rd?rd.querySelector('.mtg-other-reason'):null;
-                let reason=sel?sel.value:'Absent'; if(reason==='Other'&&oi&&oi.value) reason=oi.value;
-                absentMembers.push(`${member} (${reason})`);
-            }
+        const sel = document.getElementById('meeting-type');
+        const oi = document.getElementById('mtg-other-input');
+        let mt = sel ? sel.value : 'Meeting';
+        if (mt === 'Other' && oi && oi.value) mt = oi.value;
+        
+        const officer = document.getElementById('officer-name-input').value;
+        const md = document.getElementById('mtg-date-input') ? document.getElementById('mtg-date-input').value : '';
+        const mtime = document.getElementById('mtg-time-input') ? document.getElementById('mtg-time-input').value : '';
+        
+        let report = `MEETING ATTENDANCE\n${mt}\n${officer}\n${md} - ${mtime}\n\n`;
+        
+        Object.keys(window.groupMembers).filter(gn => gn !== 'Other Occasions').forEach(gn => {
+            report += `${gn}:\n`;
+            window.groupMembers[gn].forEach(member => {
+                const key = member.replace(/ /g,'_');
+                const cb = document.getElementById(`mtg-cb-${key}`);
+                if (cb.checked) {
+                    report += `- ${member} (PRESENT)\n`;
+                } else {
+                    const rd = document.getElementById(`mtg-reason-${key}`);
+                    const sel = rd ? rd.querySelector('.mtg-reason-sel') : null;
+                    const oi = rd ? rd.querySelector('.mtg-other-reason') : null;
+                    let reason = sel ? sel.value : 'Absent';
+                    if (reason === 'Other' && oi && oi.value) reason = oi.value;
+                    report += `- ${member} (ABSENT - ${reason})\n`;
+                }
+            });
+            report += '\n';
         });
-        const sel=document.getElementById('meeting-type'), oi=document.getElementById('mtg-other-input');
-        let mt=sel?sel.value:'Meeting'; if(mt==='Other'&&oi&&oi.value) mt=oi.value;
-        const md=document.getElementById('mtg-date-input')?document.getElementById('mtg-date-input').value:'';
-        const mtime=document.getElementById('mtg-time-input')?document.getElementById('mtg-time-input').value:'';
-        const report=`📋  Meeting Attendance\n${mt} — ${md} — ${mtime}\n\n✅ Present: ${presentMembers.join(', ')||'None'}\n\n❌ Absent: ${absentMembers.join(', ')||'None'}\n\n---\nSubmitted via Attendance Portal`;
-        navigator.clipboard.writeText(report).then(()=>showCopyFeedback('✓ Copied!')).catch(()=>alert('Could not copy'));
+        
+        navigator.clipboard.writeText(report).then(() => showCopyFeedback('✓ Copied!')).catch(() => alert('Could not copy'));
     };
 
     window.showCopyFeedback = (message) => {
@@ -1497,71 +2044,114 @@
         }
     };
 
-    // SUBMISSION
+    // SUBMISSION — FIX: properly re-enable button after success or failure
     const submitWithConfirm = async (formId, successSection) => {
-        const form=document.getElementById(formId);
+        const form = document.getElementById(formId);
         if (!confirm('Submit this record? Please verify all information is correct.')) return false;
-        const btn=form.querySelector('.btn-primary'), origText=btn.innerText;
-        btn.innerText='Submitting...'; btn.disabled=true;
+
+        // Get the correct submit button by ID (not just any btn-primary in form)
+        const btn = formId === 'form-serve'
+            ? document.getElementById('serve-submit-btn')
+            : document.getElementById('meeting-submit-btn');
+
+        const origText = btn ? btn.innerText : '';
+        if (btn) { btn.innerText = 'Submitting...'; btn.disabled = true; }
+
         try {
-            const r=await fetch('https://api.web3forms.com/submit',{method:'POST',body:new FormData(form)});
+            const r = await fetch('https://api.web3forms.com/submit', { method: 'POST', body: new FormData(form) });
             if (r.ok) {
-                if (formId==='form-serve') { lastSubmitType='attendance'; saveAttendanceHistory(); }
-                else if (formId==='form-meeting') { lastSubmitType='meeting'; saveMeetingHistory(); }
+                if (formId === 'form-serve') { lastSubmitType = 'attendance'; saveAttendanceHistory(); }
+                else if (formId === 'form-meeting') { lastSubmitType = 'meeting'; saveMeetingHistory(); }
+                // Re-enable button before navigating away
+                if (btn) { btn.innerText = origText; btn.disabled = false; }
                 showSection(successSection);
-            } else { alert('Submission error. Please try again.'); btn.innerText=origText; btn.disabled=false; }
-        } catch(err) { alert('Network error. Check your connection.'); btn.innerText=origText; btn.disabled=false; }
+            } else {
+                alert('Submission error. Please try again.');
+                if (btn) { btn.innerText = origText; btn.disabled = false; }
+            }
+        } catch(err) {
+            alert('Network error. Check your connection.');
+            if (btn) { btn.innerText = origText; btn.disabled = false; }
+        }
     };
 
     window.saveAttendanceHistory = async () => {
-        const finalSched=document.getElementById('hidden-final-sched').value;
-        const dateStr=new Date().toLocaleDateString();
-        const members=[];
-        document.querySelectorAll('.member-cb').forEach(c=>{
-            const member=c.dataset.name, key=member.replace(/ /g,'_'), status=c.checked?'present':'absent';
-            const sel=document.querySelector(`#reason-${key} .reason-select`), custom=document.getElementById(`other-reason-${key}`);
-            const reason=!c.checked&&sel?(sel.value==='Other'&&custom?custom.value:sel.value):null;
-            const subbed=subbedMembers[member]||null;
-            members.push({name:member, status, reason, subbed});
+        const finalSched = document.getElementById('hidden-final-sched').value;
+        const dateStr = new Date().toLocaleDateString();
+        const members = [];
+        document.querySelectorAll('.member-cb').forEach(c => {
+            const member = c.dataset.name;
+            const key = member.replace(/ /g,'_');
+            // Suspended members are auto-absent with reason 'Suspended'
+            if (c.dataset.suspended === 'true') {
+                members.push({ name: member, status: 'absent', reason: 'Suspended', subbed: null });
+                return;
+            }
+            const status = c.checked ? 'present' : 'absent';
+            const sel = document.querySelector(`#reason-${key} .reason-select`);
+            const custom = document.getElementById(`other-reason-${key}`);
+            const reason = !c.checked && sel ? (sel.value === 'Other' && custom ? custom.value : sel.value) : null;
+            const subbed = subbedMembers[member] || null;
+            members.push({ name: member, status, reason, subbed });
         });
         try {
-            await window._addDoc(window._collection(window._db,"group_attendance"),{
-                group:currentGroup, schedule:finalSched, date:dateStr,
-                members, submitted_by:window.currentUserId, timestamp:window._serverTimestamp()
-            });
+            // Organized: one document per member per submission, stored under attendance_records
+            // with group and schedule context for easy querying
             for (const m of members) {
-                await window._addDoc(window._collection(window._db,"attendance_history"),{
-                    member_name:m.name, group:currentGroup, schedule:finalSched, date:dateStr,
-                    status:m.status, reason:m.reason, subbed:m.subbed, timestamp:window._serverTimestamp()
+                await window._addDoc(window._collection(window._db, "attendance_records"), {
+                    member_name: m.name,
+                    group: currentGroup,
+                    schedule: finalSched,
+                    date: dateStr,
+                    status: m.status,
+                    reason: m.reason || null,
+                    subbed: m.subbed || null,
+                    submitted_by: window.currentUserId,
+                    timestamp: window._serverTimestamp()
                 });
             }
-        } catch(err) { console.error('Error saving attendance:',err); }
+        } catch(err) { console.error('Error saving attendance:', err); }
     };
 
     window.saveMeetingHistory = async () => {
-        const dateStr=new Date().toLocaleDateString();
-        const mtgType=document.getElementById('meeting-type')?document.getElementById('meeting-type').value:'Meeting';
-        const mtgTime=document.getElementById('mtg-time-input')?document.getElementById('mtg-time-input').value:'';
-        const members=[];
-        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb=>{
-            const member=cb.dataset.member, key=member.replace(/ /g,'_');
-            const status=cb.checked?'present':'absent';
+        const dateStr = new Date().toLocaleDateString();
+        const mtgDateInput = document.getElementById('mtg-date-input');
+        const mtgDate = mtgDateInput ? mtgDateInput.value : dateStr;
+        let mtgType = document.getElementById('meeting-type') ? document.getElementById('meeting-type').value : 'Meeting';
+        const mtgOther = document.getElementById('mtg-other-input');
+        if (mtgType === 'Other' && mtgOther && mtgOther.value) mtgType = mtgOther.value;
+        const mtgTime = document.getElementById('mtg-time-input') ? document.getElementById('mtg-time-input').value : '';
+        const members = [];
+        document.querySelectorAll('#meeting-full-list input[type="checkbox"]').forEach(cb => {
+            const member = cb.dataset.member;
+            const key = member.replace(/ /g,'_');
+            const status = cb.checked ? 'present' : 'absent';
             if (!cb.checked) {
-                const rd=document.getElementById(`mtg-reason-${key}`), sel=rd?rd.querySelector('.mtg-reason-sel'):null, oi=rd?rd.querySelector('.mtg-other-reason'):null;
-                let reason=sel?sel.value:'Absent'; if(reason==='Other'&&oi&&oi.value) reason=oi.value;
-                members.push({name:member, status, reason});
+                const rd = document.getElementById(`mtg-reason-${key}`);
+                const sel = rd ? rd.querySelector('.mtg-reason-sel') : null;
+                const oi = rd ? rd.querySelector('.mtg-other-reason') : null;
+                let reason = sel ? sel.value : 'Absent';
+                if (reason === 'Other' && oi && oi.value) reason = oi.value;
+                members.push({ name: member, status, reason });
             } else {
-                members.push({name:member, status});
+                members.push({ name: member, status });
             }
         });
         try {
             for (const m of members) {
-                await window._addDoc(window._collection(window._db,"attendance_history"),{
-                    member_name:m.name, group:'Meeting', meeting_type:mtgType, meeting_time:mtgTime, date:dateStr,
-                    status:m.status, reason:m.reason||null, timestamp:window._serverTimestamp()
+                await window._addDoc(window._collection(window._db, "attendance_records"), {
+                    member_name: m.name,
+                    group: 'Meeting',
+                    meeting_type: mtgType,
+                    meeting_time: mtgTime,
+                    date: mtgDate || dateStr,
+                    status: m.status,
+                    reason: m.reason || null,
+                    submitted_by: window.currentUserId,
+                    timestamp: window._serverTimestamp()
                 });
             }
-        } catch(err) { console.error('Error saving meeting:',err); }
+        } catch(err) { console.error('Error saving meeting:', err); }
     };
 
     document.getElementById('form-serve').onsubmit = async (e) => {
@@ -1569,6 +2159,7 @@
         let rep=[];
         document.querySelectorAll('.member-cb').forEach(c=>{
             const m=c.dataset.name, key=m.replace(/ /g,'_');
+            if (c.dataset.suspended === 'true') { rep.push(`${m}: [ABSENT] - Suspended`); return; }
             if (c.checked) { const sub=subbedMembers[m]; rep.push(`${m}: [PRESENT]${sub?` (Subbed w/ ${sub})`:''}`); }
             else {
                 const sel=document.querySelector(`#reason-${key} .reason-select`), custom=document.getElementById(`other-reason-${key}`);
